@@ -1,0 +1,6 @@
+[submodule "lib/Adafruit_BusIO"]
+	path = lib/Adafruit_BusIO
+	url = https://github.com/adafruit/Adafruit_BusIO.git
+[submodule "lib/Adafruit-BMP085-Library"]
+	path = lib/Adafruit-BMP085-Library
+	url = https://github.com/adafruit/Adafruit-BMP085-Library.git
