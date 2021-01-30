@@ -16,7 +16,6 @@
 #include <Wire.h>
 
 #include <Adafruit_BMP085.h>
-//#include <Adafruit_Sensor.h>
 
 #include "exixe.h"
 
@@ -60,8 +59,8 @@ RTC_DS3231 RTC; // we are using the DS3231 RTC
 enum Mode {
     hours_mins = 0,
     mins_secs = 1,
-    temperature = 2
-    // pressure = 3
+    temperature = 2,
+    pressure = 3
 };
 
 Mode mode = hours_mins;
@@ -196,10 +195,8 @@ void display_crossfade(unsigned int left_pair, unsigned int right_pair) {
 
     int right_pair_1 = right_pair / 10;
     int old_right_pair_1 = old_right_pair / 10;
-    //set_digit(ten_min, &digit_3);
 
     int right_pair_2 = right_pair - (right_pair_1 * 10);
-    //set_digit(one_min, &digit_4);
 
     if (right_pair_1 != old_right_pair_1) {
         two_digit_crossfade(right_pair_1, &digit_3, right_pair_2, &digit_4);
@@ -223,6 +220,9 @@ bool check_mode_switch() {
                 mode = temperature;
                 break;
             case temperature:
+                mode = pressure;
+                break;
+            case pressure:
                 mode = hours_mins;
                 break;
             default:
@@ -244,8 +244,28 @@ void show_color() {
     digit_4.set_led(0, 0, 64);
 }
 
+/**
+ * @return temperature in degrees Fahrenheit.
+ */
 float get_temp() {
     return bmp.readTemperature() * (9.0 / 5.0) + 32.0; // C --> F
+}
+
+/**
+ * Butte is 1,691.64 m (5,550 ft)
+ * One hPa is 0.0002953 inch Hg
+ * @aparam alt Altitude in meters.
+ * @return sea level pressure in inches of Hg
+ */
+float get_sea_level_pressure(float alt = 1691.64) {
+    return bmp.readSealevelPressure(alt) * 0.0002953;
+}
+
+/**
+ * @return sea level pressure in inches of Hg
+ */
+float get_pressure() {
+    return bmp.readPressure() * 0.0002953;
 }
 
 void setup() {
@@ -317,6 +337,13 @@ void loop() {
             break;
         }
 
+       case pressure: {
+            float pressure = get_pressure();
+            left_pair = (unsigned int)trunc(pressure);
+            right_pair = (unsigned int)trunc((pressure - left_pair) * 10);
+            break;
+            }
+  
         default:
             left_pair = now.hour();
             right_pair = now.minute();
@@ -361,6 +388,18 @@ void loop() {
             break;
         }
 
+        case pressure: {
+            float temperature = get_pressure();
+            unsigned int new_left_pair = (unsigned int)trunc(temperature);
+            unsigned int new_right_pair = (unsigned int)trunc((temperature - new_left_pair) * 10);
+            if (old_left_pair != new_left_pair || old_right_pair != new_right_pair) {
+                display_crossfade(new_left_pair, new_right_pair);
+
+                old_left_pair = new_left_pair;
+                old_right_pair = new_right_pair;
+            }
+            break;
+        }
         default:
             break;
         }
@@ -368,9 +407,11 @@ void loop() {
 
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
-
+#if 0
     if (mode != mins_secs)
         delay(1000); // 1s
     else
-        delay(100); // 0.1s
+#endif
+
+    delay(100); // 0.1s
 }
