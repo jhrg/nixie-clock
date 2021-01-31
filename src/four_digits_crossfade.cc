@@ -69,54 +69,16 @@ Adafruit_BMP085 bmp;
 
 bool bmp_ok = false; // true after sucessful init
 
-/**
- * Initialize the BMP180 sensor. Diagnostic I/0 requires Serial
- */
-void bmp180_setup() {
-    Serial.println("Pressure Sensor Test");
-    Serial.println("");
-
-    /* Initialise the sensor */
-    if (!bmp.begin()) {
-        /* There was a problem detecting the BMP085 ... check your connections */
-        Serial.print("Ooops, no BMP085 detected ... Check your wiring or I2C ADDR!");
-    }
-
-    float temperature = bmp.readTemperature();
-    Serial.print("Temperature: ");
-    Serial.print(temperature);
-    Serial.println(" C");
-
-#if 0
-    // readPressure() doesn't work for the BMP180 I have, but the 
-    // raw value might work.
-    float pressure = bmp.readPressure();
-    Serial.print("Pressure: ");
-    Serial.print(pressure);
-    Serial.println(" hPa");
-#endif
-    // 290.78; raw / 290.78 = hPa
-    // 1 hPa == 0.0294 inches of Hg
-    // hPa / 33.998 = in Hg
-
-    uint32_t raw_pressure = bmp.readRawPressure();
-    Serial.print("Raw Pressure: ");
-    Serial.println(raw_pressure);
-    Serial.print("Pressure: ");
-    Serial.print((raw_pressure / 290.78) / 33.998);
-    Serial.println(" Hg");
-}
-
 void set_digit_crossfade(int count, exixe *tube) {
     /*
-  1st arg: Digit to show, 0 to 9
-  2nd arg: how many frames does crossfade last, 30 frames = 1 second
-  3rd arg: digit brightness, 0 to 127
-  4th arg: overdrive, 0 disable 1 enable
+        1st arg: Digit to show, 0 to 9
+        2nd arg: how many frames does crossfade last, 30 frames = 1 second
+        3rd arg: digit brightness, 0 to 127
+        4th arg: overdrive, 0 disable 1 enable
 
-  This function sets up the crossfade animation
-  call crossfade_run() to actually start it
-  */
+        This function sets up the crossfade animation
+        call crossfade_run() to actually start it
+    */
     tube->crossfade_init(count, 15, 127, 0);
 
     // crossfade_run() is non-blocking and returns right away
@@ -148,6 +110,48 @@ void two_digit_crossfade(int count_1, exixe *tube_1, int count_2, exixe *tube_2)
     while (tube_2->crossfade_run() == EXIXE_ANIMATION_IN_PROGRESS)
         ;
 }
+
+#if 1
+#define NUM_TUBES 4
+typedef exixe *Tubes[NUM_TUBES];
+
+/**
+ * Given an array of the tubes and values, starting the left most digit and
+ * going to the rightmost, use the crossfade to update the last 'count' tubes'
+ * values.
+ * 
+ * Only call this function if at least one tube's value should change.
+ * 
+ * @param tubes An array of exixe pointers - digit_1 == [0], ...
+ * @param value An array of digit values
+ * @param count the number of tubes/digits to change (1-4), starting
+ * with the fourth tube and working backward.
+ */
+void digit_crossfade(Tubes tubes, int value[NUM_TUBES], int count) {
+
+    int i = NUM_TUBES - 1;
+    do {
+        tubes[i]->crossfade_init(value[i], 15, 127, 0);
+        --i;
+    } while (i >= (NUM_TUBES - count));
+
+    bool done;
+    do {
+        done = true;
+        switch (count) {
+        case 4:
+            done = done && (tubes[0]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+        case 3:
+            done = done && (tubes[1]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+        case 2:
+            done = done && (tubes[2]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+        case 1:
+            done = done && (tubes[3]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+            break;
+        }
+    } while (!done);
+}
+#endif
 
 void set_digit(int count, exixe *tube, bool fade) {
     if (fade) {
@@ -337,13 +341,13 @@ void loop() {
             break;
         }
 
-       case pressure: {
+        case pressure: {
             float pressure = get_pressure();
             left_pair = (unsigned int)trunc(pressure);
             right_pair = (unsigned int)trunc((pressure - left_pair) * 10);
             break;
-            }
-  
+        }
+
         default:
             left_pair = now.hour();
             right_pair = now.minute();
@@ -407,11 +411,6 @@ void loop() {
 
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
-#if 0
-    if (mode != mins_secs)
-        delay(1000); // 1s
-    else
-#endif
 
     delay(100); // 0.1s
 }
