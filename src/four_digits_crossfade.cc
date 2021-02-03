@@ -227,12 +227,12 @@ float get_temp() {
 }
 
 /**
- * Butte is 1,691.64 m (5,550 ft)
+ * Butte is 1,682 m (5,518 ft)
  * One hPa is 0.0002953 inch Hg
  * @aparam alt Altitude in meters.
  * @return sea level pressure in inches of Hg
  */
-float get_sea_level_pressure(float alt = 1691.64) {
+float get_sea_level_pressure(float alt = 1682) {
     return bmp.readSealevelPressure(alt) * 0.0002953;
 }
 
@@ -319,7 +319,7 @@ void loop() {
         }
 
         case pressure: {
-            float pressure = get_pressure();
+            float pressure = get_sea_level_pressure(); // get_pressure();
             unsigned int int_press = trunc(pressure);
             set_values(int_press, trunc((pressure - int_press) * 10));
             break;
@@ -368,7 +368,7 @@ void loop() {
         }
 
         case pressure: {
-            float pressure = get_pressure();
+            float pressure = get_sea_level_pressure(); // get_pressure();
             unsigned int int_press = trunc(pressure);
             set_values(int_press, trunc((pressure - int_press) * 10));
             if ((digit = values_changed())) {
