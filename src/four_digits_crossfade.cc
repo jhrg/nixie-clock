@@ -38,20 +38,24 @@
 
 #define INITIAL_FADE_TIME 250 // ms, time to fade in a digit when modes change
 
-// set to 1 for hours & mins (24h) or 0 for mins & secs
-//#define HOURS_MINS 0
-
-//unsigned char count = 0;
-
-// Set in setup() and thereafter loop()
-unsigned int old_left_pair;
-unsigned int old_right_pair;
-
-// Clock digits
+// Clock digits, left to right
 exixe digit_1 = exixe(digit_1_cs);
 exixe digit_2 = exixe(digit_2_cs);
 exixe digit_3 = exixe(digit_3_cs);
 exixe digit_4 = exixe(digit_4_cs);
+
+#define NUM_TUBES 4
+#define DIGIT_1 0
+#define DIGIT_2 1
+#define DIGIT_3 2
+#define DIGIT_4 3
+
+exixe *tubes[NUM_TUBES];
+unsigned int values[NUM_TUBES];
+unsigned int old_values[NUM_TUBES];
+
+unsigned int brightness = 64; // 0 - 127
+unsigned int fade_time = 15;  // 30 frames = 1 second
 
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
@@ -69,51 +73,36 @@ Adafruit_BMP085 bmp;
 
 bool bmp_ok = false; // true after sucessful init
 
-void set_digit_crossfade(int count, exixe *tube) {
-    /*
-        1st arg: Digit to show, 0 to 9
-        2nd arg: how many frames does crossfade last, 30 frames = 1 second
-        3rd arg: digit brightness, 0 to 127
-        4th arg: overdrive, 0 disable 1 enable
-
-        This function sets up the crossfade animation
-        call crossfade_run() to actually start it
-    */
-    tube->crossfade_init(count, 15, 127, 0);
-
-    // crossfade_run() is non-blocking and returns right away
-    // call it regularly(at least every 33ms) for a smooth animation
-    // check its return value to see if the animation is finished
-    while (tube->crossfade_run() == EXIXE_ANIMATION_IN_PROGRESS)
-        ;
+/**
+ * Copy the values[] array to the old_values[] array
+ */
+void save_values() {
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        old_values[i] = values[i];
+    }
 }
 
-void two_digit_crossfade(int count_1, exixe *tube_1, int count_2, exixe *tube_2) {
-    /*
-  1st arg: Digit to show, 0 to 9
-  2nd arg: how many frames does crossfade last, 30 frames = 1 second
-  3rd arg: digit brightness, 0 to 127
-  4th arg: overdrive, 0 disable 1 enable
-
-  This function sets up the crossfade animation
-  call crossfade_run() to actually start it
-  */
-    tube_1->crossfade_init(count_1, 15, 127, 0);
-    tube_2->crossfade_init(count_2, 15, 127, 0);
-
-    // crossfade_run() is non-blocking and returns right away
-    // call it regularly(at least every 33ms) for a smooth animation
-    // check its return value to see if the animation is finished
-    while (tube_1->crossfade_run() == EXIXE_ANIMATION_IN_PROGRESS)
-        tube_2->crossfade_run();
-
-    while (tube_2->crossfade_run() == EXIXE_ANIMATION_IN_PROGRESS)
-        ;
+/**
+ * Set the values[] array.
+ */
+void set_values(unsigned int left_pair, unsigned int right_pair) {
+    values[DIGIT_1] = left_pair / 10;
+    values[DIGIT_2] = left_pair - values[DIGIT_1] * 10;
+    values[DIGIT_3] = right_pair / 10;
+    values[DIGIT_4] = right_pair - values[DIGIT_3] * 10;
 }
 
-#if 1
-#define NUM_TUBES 4
-typedef exixe *Tubes[NUM_TUBES];
+/**
+ * If old_values[] is not equal to values[], return the index of the leftmost
+ * digit that differs (1, 2, 3, 4). If old_values[] == values[], return 0;
+ */
+unsigned int values_changed() {
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        if (old_values[i] != values[i])
+            return NUM_TUBES - i;
+    }
+    return 0;
+}
 
 /**
  * Given an array of the tubes and values, starting the left most digit and
@@ -123,90 +112,72 @@ typedef exixe *Tubes[NUM_TUBES];
  * Only call this function if at least one tube's value should change.
  * 
  * @param tubes An array of exixe pointers - digit_1 == [0], ...
- * @param value An array of digit values
+ * @param values An array of digit values
  * @param count the number of tubes/digits to change (1-4), starting
  * with the fourth tube and working backward.
  */
-void digit_crossfade(Tubes tubes, int value[NUM_TUBES], int count) {
+void digit_crossfade(unsigned int count) {
 
-    int i = NUM_TUBES - 1;
-    do {
-        tubes[i]->crossfade_init(value[i], 15, 127, 0);
-        --i;
-    } while (i >= (NUM_TUBES - count));
+    switch (count) {
+    case 4:
+        tubes[DIGIT_1]->crossfade_init(values[DIGIT_1], fade_time * 2, brightness, 0);
+    case 3:
+        tubes[DIGIT_2]->crossfade_init(values[DIGIT_2], fade_time * 2, brightness, 0);
+    case 2:
+        tubes[DIGIT_3]->crossfade_init(values[DIGIT_3], fade_time, brightness, 0);
+    case 1:
+        tubes[DIGIT_4]->crossfade_init(values[DIGIT_4], fade_time, brightness, 0);
+        break;
+    }
+
+    if (mode == temperature || mode == pressure)
+        digit_2.set_dots(0, brightness);
+    else
+        digit_2.set_dots(0, 0);
 
     bool done;
     do {
         done = true;
         switch (count) {
         case 4:
-            done = done && (tubes[0]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+            done = (tubes[DIGIT_1]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
+            //delay(5);
         case 3:
-            done = done && (tubes[1]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+            done = (tubes[DIGIT_2]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
+            //delay(5);
         case 2:
-            done = done && (tubes[2]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
+            done = (tubes[DIGIT_3]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
+            //delay(5);
         case 1:
-            done = done && (tubes[3]->crossfade_run() == EXIXE_ANIMATION_FINISHED);
-            break;
+            done = (tubes[DIGIT_4]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
+            //delay(5);
         }
     } while (!done);
 }
-#endif
 
 void set_digit(int count, exixe *tube, bool fade) {
     if (fade) {
-        unsigned int delta = ceil(INITIAL_FADE_TIME / 127);
-        for (int brightness = 0; brightness < 128; brightness++) {
-            tube->show_digit(count, brightness, 0);
+        unsigned int delta = ceil(INITIAL_FADE_TIME / brightness);
+        for (unsigned int b = 0; b < brightness + 1; b++) {
+            tube->show_digit(count, b, 0);
             delay(delta);
         }
     } else {
-        tube->show_digit(count, 127, 0);
+        tube->show_digit(count, brightness, 0);
     }
 }
 
-void display(unsigned int left_pair, unsigned int right_pair, bool fade = false) {
-    int left_pair_1 = left_pair / 10;
-    set_digit(left_pair_1, &digit_1, fade);
+void display(bool fade = false) {
+    set_digit(values[DIGIT_1], tubes[DIGIT_1], fade);
+    set_digit(values[DIGIT_2], tubes[DIGIT_2], fade);
 
-    int left_pair_2 = left_pair - (left_pair_1 * 10);
-    set_digit(left_pair_2, &digit_2, fade);
-
-    if (mode == temperature)
-        digit_2.set_dots(0, 127);
+    if (mode == temperature || mode == pressure)
+        tubes[DIGIT_2]->set_dots(0, brightness);
     else
-        digit_2.set_dots(0, 0);
+        tubes[DIGIT_2]->set_dots(0, 0);
 
-    int right_pair_1 = right_pair / 10;
-    set_digit(right_pair_1, &digit_3, fade);
-
-    int right_pair_2 = right_pair - (right_pair_1 * 10);
-    set_digit(right_pair_2, &digit_4, fade);
-}
-
-void display_crossfade(unsigned int left_pair, unsigned int right_pair) {
-    int left_pair_1 = left_pair / 10;
-    // int old_ten_hour = left_pair / 10;
-    set_digit(left_pair_1, &digit_1, false);
-
-    int left_pair_2 = left_pair - (left_pair_1 * 10);
-    set_digit(left_pair_2, &digit_2, false);
-
-    if (mode == temperature)
-        digit_2.set_dots(0, 127);
-    else
-        digit_2.set_dots(0, 0);
-
-    int right_pair_1 = right_pair / 10;
-    int old_right_pair_1 = old_right_pair / 10;
-
-    int right_pair_2 = right_pair - (right_pair_1 * 10);
-
-    if (right_pair_1 != old_right_pair_1) {
-        two_digit_crossfade(right_pair_1, &digit_3, right_pair_2, &digit_4);
-    } else {
-        set_digit_crossfade(right_pair_2, &digit_4);
-    }
+    set_digit(values[DIGIT_3], tubes[DIGIT_3], fade);
+    set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
 }
 
 /**
@@ -242,10 +213,10 @@ bool check_mode_switch() {
 }
 
 void show_color() {
-    digit_1.set_led(0, 0, 64);
-    digit_2.set_led(0, 0, 64);
-    digit_3.set_led(0, 0, 64);
-    digit_4.set_led(0, 0, 64);
+    digit_1.set_led(0, 0, 32);
+    digit_2.set_led(0, 0, 32);
+    digit_3.set_led(0, 0, 32);
+    digit_4.set_led(0, 0, 32);
 }
 
 /**
@@ -306,14 +277,24 @@ void setup() {
     digit_3.clear();
     digit_4.clear();
 
+    tubes[DIGIT_1] = &digit_1;
+    tubes[DIGIT_2] = &digit_2;
+    tubes[DIGIT_3] = &digit_3;
+    tubes[DIGIT_4] = &digit_4;
+
     show_color();
 
     // Initial display; show hours & mins
     DateTime now(RTC.now());
     // record these values for use later to determine when dgits change
-    old_left_pair = now.hour();
-    old_right_pair = now.minute();
-    display(old_left_pair, old_right_pair, true /* fade */);
+    //old_left_pair = now.hour();
+    //old_right_pair = now.minute();
+    // display(old_left_pair, old_right_pair, true /* fade */);
+
+    set_values(now.hour(), now.minute());
+    save_values();
+
+    display(true);
 }
 
 void loop() {
@@ -321,86 +302,79 @@ void loop() {
 
     // If we switched modes, update the display
     if (check_mode_switch()) {
-        unsigned int left_pair;
-        unsigned int right_pair;
         switch (mode) {
         case hours_mins:
-            left_pair = now.hour();
-            right_pair = now.minute();
+            set_values(now.hour(), now.minute());
             break;
 
         case mins_secs:
-            left_pair = now.minute();
-            right_pair = now.second();
+            set_values(now.minute(), now.second());
             break;
 
         case temperature: {
             float temperature = get_temp();
-            left_pair = (unsigned int)trunc(temperature);
-            right_pair = (unsigned int)trunc((temperature - left_pair) * 10);
+            unsigned int int_temp = trunc(temperature);
+            set_values(int_temp, trunc((temperature - int_temp) * 10));
             break;
         }
 
         case pressure: {
             float pressure = get_pressure();
-            left_pair = (unsigned int)trunc(pressure);
-            right_pair = (unsigned int)trunc((pressure - left_pair) * 10);
+            unsigned int int_press = trunc(pressure);
+            set_values(int_press, trunc((pressure - int_press) * 10));
             break;
         }
 
         default:
-            left_pair = now.hour();
-            right_pair = now.minute();
-
+            set_values(now.hour(), now.minute());
             break;
         }
 
-        display(left_pair, right_pair, true /* fade */);
+        display(true);
+        save_values();
 
-        old_left_pair = left_pair;
-        old_right_pair = right_pair;
     } else {
+        unsigned int digit = 0;
         switch (mode) {
         case hours_mins:
-            if (old_left_pair != now.hour() || old_right_pair != now.minute()) {
-                display_crossfade(now.hour(), now.minute());
+            set_values(now.hour(), now.minute());
 
-                old_left_pair = now.hour();
-                old_right_pair = now.minute();
+            if ((digit = values_changed())) {
+                digit_crossfade(digit);
+                // display_crossfade(now.hour(), now.minute());
+                save_values();
             }
             break;
 
         case mins_secs:
-            if (old_left_pair != now.minute() || old_right_pair != now.second()) {
-                display_crossfade(now.minute(), now.second());
-
-                old_left_pair = now.minute();
-                old_right_pair = now.second();
+            set_values(now.minute(), now.second());
+            if ((digit = values_changed())) {
+                digit_crossfade(digit);
+                // display_crossfade(now.minute(), now.second());
+                save_values();
             }
             break;
 
         case temperature: {
             float temperature = get_temp();
-            unsigned int new_left_pair = (unsigned int)trunc(temperature);
-            unsigned int new_right_pair = (unsigned int)trunc((temperature - new_left_pair) * 10);
-            if (old_left_pair != new_left_pair || old_right_pair != new_right_pair) {
-                display_crossfade(new_left_pair, new_right_pair);
-
-                old_left_pair = new_left_pair;
-                old_right_pair = new_right_pair;
+            unsigned int int_temp = trunc(temperature);
+            set_values(int_temp, trunc((temperature - int_temp) * 10));
+            if ((digit = values_changed())) {
+                digit_crossfade(digit);
+                // display_crossfade(now.minute(), now.second());
+                save_values();
             }
             break;
         }
 
         case pressure: {
-            float temperature = get_pressure();
-            unsigned int new_left_pair = (unsigned int)trunc(temperature);
-            unsigned int new_right_pair = (unsigned int)trunc((temperature - new_left_pair) * 10);
-            if (old_left_pair != new_left_pair || old_right_pair != new_right_pair) {
-                display_crossfade(new_left_pair, new_right_pair);
-
-                old_left_pair = new_left_pair;
-                old_right_pair = new_right_pair;
+            float pressure = get_pressure();
+            unsigned int int_press = trunc(pressure);
+            set_values(int_press, trunc((pressure - int_press) * 10));
+            if ((digit = values_changed())) {
+                digit_crossfade(digit);
+                // display_crossfade(now.minute(), now.second());
+                save_values();
             }
             break;
         }
