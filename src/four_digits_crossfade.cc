@@ -22,13 +22,12 @@
 #define GPIO04 4
 #define GPIO05 5
 
-#define MODE_SWITCH 16
+#define MODE_SWITCH 3 // RX
 
 #define digit_1_cs 15 // D8
 #define digit_2_cs 2  // D4
 #define digit_3_cs 0  // D3
-// #define mins_cs 16       // D0
-#define digit_4_cs 10 // SD3 was: 3 // RX
+#define digit_4_cs 16 // D0
 
 // Number opf seconds it takes to compile, upload and run this program
 // at 9600 baud. Used to adjust the clock
@@ -314,14 +313,14 @@ void loop() {
         case temperature: {
             float temperature = get_temp();
             unsigned int int_temp = trunc(temperature);
-            set_values(int_temp, trunc((temperature - int_temp) * 10));
+            set_values(int_temp, trunc((temperature - int_temp) * 100));
             break;
         }
 
         case pressure: {
             float pressure = get_sea_level_pressure(); // get_pressure();
             unsigned int int_press = trunc(pressure);
-            set_values(int_press, trunc((pressure - int_press) * 10));
+            set_values(int_press, trunc((pressure - int_press) * 100));
             break;
         }
 
@@ -341,7 +340,6 @@ void loop() {
 
             if ((digit = values_changed())) {
                 digit_crossfade(digit);
-                // display_crossfade(now.hour(), now.minute());
                 save_values();
             }
             break;
@@ -350,7 +348,6 @@ void loop() {
             set_values(now.minute(), now.second());
             if ((digit = values_changed())) {
                 digit_crossfade(digit);
-                // display_crossfade(now.minute(), now.second());
                 save_values();
             }
             break;
@@ -358,10 +355,9 @@ void loop() {
         case temperature: {
             float temperature = get_temp();
             unsigned int int_temp = trunc(temperature);
-            set_values(int_temp, trunc((temperature - int_temp) * 10));
+            set_values(int_temp, trunc((temperature - int_temp) * 100));
             if ((digit = values_changed())) {
                 digit_crossfade(digit);
-                // display_crossfade(now.minute(), now.second());
                 save_values();
             }
             break;
@@ -370,10 +366,9 @@ void loop() {
         case pressure: {
             float pressure = get_sea_level_pressure(); // get_pressure();
             unsigned int int_press = trunc(pressure);
-            set_values(int_press, trunc((pressure - int_press) * 10));
+            set_values(int_press, trunc((pressure - int_press) * 100));
             if ((digit = values_changed())) {
                 digit_crossfade(digit);
-                // display_crossfade(now.minute(), now.second());
                 save_values();
             }
             break;
