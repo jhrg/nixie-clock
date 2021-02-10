@@ -56,20 +56,27 @@ exixe *tubes[NUM_TUBES];
 unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
-unsigned int brightness = 64; // 0 - 127
+unsigned int brightness = 127; // 0 - 127
 unsigned int fade_time = 15;  // 30 frames = 1 second
 
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
 
-enum Mode {
+enum DisplayMode {
     hours_mins = 0,
     mins_secs = 1,
     temperature = 2,
     pressure = 3
 };
 
-Mode mode = hours_mins;
+enum ControlMode {
+    info = 0,
+    display_intensity = 1,
+    color = 2,
+    led_intensity = 3
+};
+
+DisplayMode display_mode = hours_mins;
 
 Adafruit_BMP085 bmp;
 
@@ -153,7 +160,7 @@ void digit_crossfade(unsigned int count) {
         break;
     }
 
-    if (mode == temperature || mode == pressure)
+    if (display_mode == temperature || display_mode == pressure)
         digit_2.set_dots(0, brightness);
     else
         digit_2.set_dots(0, 0);
@@ -194,7 +201,7 @@ void display(bool fade = false) {
     set_digit(values[DIGIT_1], tubes[DIGIT_1], fade);
     set_digit(values[DIGIT_2], tubes[DIGIT_2], fade);
 
-    if (mode == temperature || mode == pressure)
+    if (display_mode == temperature || display_mode == pressure)
         tubes[DIGIT_2]->set_dots(0, brightness);
     else
         tubes[DIGIT_2]->set_dots(0, 0);
@@ -204,27 +211,27 @@ void display(bool fade = false) {
 }
 
 /**
- * Return true if the mode changed and update the mode global.
+ * Return true if the display_mode changed and update the display_mode global.
  */
 bool check_mode_switch() {
     if (mode_change) { // digitalRead(MODE_SWITCH) == LOW) {
         //delay(100);
         //if (digitalRead(MODE_SWITCH) == LOW) {
-            switch (mode) {
+            switch (display_mode) {
             case hours_mins:
-                mode = mins_secs;
+                display_mode = mins_secs;
                 break;
             case mins_secs:
-                mode = temperature;
+                display_mode = temperature;
                 break;
             case temperature:
-                mode = pressure;
+                display_mode = pressure;
                 break;
             case pressure:
-                mode = hours_mins;
+                display_mode = hours_mins;
                 break;
             default:
-                mode = hours_mins;
+                display_mode = hours_mins;
                 break;
             }
             mode_change = false;
@@ -331,10 +338,9 @@ long pos = 0;
 
 void loop() {
     // Test the rotary encoder and update brightness
-    encoder.tick();
     long newPos = encoder.getPosition();
     if (newPos != pos) {
-        brightness += (newPos - pos);
+        brightness += 5*(newPos - pos);
         if (brightness > 127)
             brightness = 127;
         else if (brightness < 0)
@@ -349,7 +355,7 @@ void loop() {
 
     // If we switched modes, update the display
     if (check_mode_switch()) {
-        switch (mode) {
+        switch (display_mode) {
         case hours_mins:
             Serial.println("in check_mode_switch() hours_mins");
             set_values(now.hour(), now.minute());
@@ -385,7 +391,7 @@ void loop() {
 
     } else {
         unsigned int digit = 0;
-        switch (mode) {
+        switch (display_mode) {
         case hours_mins:
             set_values(now.hour(), now.minute());
 
