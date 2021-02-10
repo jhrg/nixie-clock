@@ -14,6 +14,7 @@
 
 #include <RTClibExtended.h>
 #include <Wire.h>
+#include <RotaryEncoder.h>
 
 #include <Adafruit_BMP085.h>
 
@@ -22,12 +23,14 @@
 #define GPIO04 4
 #define GPIO05 5
 
-#define MODE_SWITCH 3 // RX
+#define MODE_SWITCH D8
+#define ROTARY_1 D3
+#define ROTARY_2 D4
 
-#define digit_1_cs 15 // D8
-#define digit_2_cs 2  // D4
-#define digit_3_cs 0  // D3
-#define digit_4_cs 16 // D0
+#define digit_1_cs 1
+#define digit_2_cs 3
+#define digit_3_cs 10
+#define digit_4_cs 16
 
 // Number opf seconds it takes to compile, upload and run this program
 // at 9600 baud. Used to adjust the clock
@@ -71,6 +74,27 @@ Mode mode = hours_mins;
 Adafruit_BMP085 bmp;
 
 bool bmp_ok = false; // true after sucessful init
+
+// Setup a RotaryEncoder with 4 steps per latch for the 2 signal input pins:
+// RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
+
+// Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
+RotaryEncoder encoder(ROTARY_1, ROTARY_2, RotaryEncoder::LatchMode::TWO03);
+
+bool mode_change = false;
+unsigned long mode_switch_time = 0;
+#define MODE_SWITCH_INTERVAL 100 // ms
+
+ICACHE_RAM_ATTR void mode_switch() {
+    if (abs(millis() - mode_switch_time) > MODE_SWITCH_INTERVAL) {
+        mode_change = true;
+        mode_switch_time = millis();
+    }
+}
+
+ICACHE_RAM_ATTR void rotary_encoder() {
+    encoder.tick();
+}
 
 /**
  * Copy the values[] array to the old_values[] array
@@ -183,9 +207,9 @@ void display(bool fade = false) {
  * Return true if the mode changed and update the mode global.
  */
 bool check_mode_switch() {
-    if (digitalRead(MODE_SWITCH) == LOW) {
-        delay(100);
-        if (digitalRead(MODE_SWITCH) == LOW) {
+    if (mode_change) { // digitalRead(MODE_SWITCH) == LOW) {
+        //delay(100);
+        //if (digitalRead(MODE_SWITCH) == LOW) {
             switch (mode) {
             case hours_mins:
                 mode = mins_secs;
@@ -203,9 +227,9 @@ bool check_mode_switch() {
                 mode = hours_mins;
                 break;
             }
-
+            mode_change = false;
             return true;
-        }
+        //}
     }
 
     return false;
@@ -243,12 +267,19 @@ float get_pressure() {
 }
 
 void setup() {
-    Serial.begin(BAUD_RATE);
-    Serial.println("Boot");
-    Serial.flush();
+    // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
+    // But using FALLING seems more reliable
+    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
+    
+    // Rotary encoder
+    attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
 
-    pinMode(MODE_SWITCH, INPUT);
-
+    pinMode(digit_1_cs, OUTPUT);
+    pinMode(digit_2_cs, OUTPUT);
+    pinMode(digit_3_cs, OUTPUT);
+    pinMode(digit_4_cs, OUTPUT);
+    
     // Setup the I2C bus for the DS3231 clock
     // On the NodeMCU, GPIOR04 is D2, GPIOR05 is D1
     int sda = GPIO04;
@@ -296,21 +327,41 @@ void setup() {
     display(true);
 }
 
+long pos = 0;
+
 void loop() {
+    // Test the rotary encoder and update brightness
+    encoder.tick();
+    long newPos = encoder.getPosition();
+    if (newPos != pos) {
+        brightness += (newPos - pos);
+        if (brightness > 127)
+            brightness = 127;
+        else if (brightness < 0)
+            brightness = 0;
+
+        display(false);
+
+        pos = newPos;
+    } 
+
     DateTime now(RTC.now());
 
     // If we switched modes, update the display
     if (check_mode_switch()) {
         switch (mode) {
         case hours_mins:
+            Serial.println("in check_mode_switch() hours_mins");
             set_values(now.hour(), now.minute());
             break;
 
         case mins_secs:
+            Serial.println("in check_mode_switch() mins_secs");
             set_values(now.minute(), now.second());
             break;
 
         case temperature: {
+            Serial.println("in check_mode_switch() temperature");
             float temperature = get_temp();
             unsigned int int_temp = trunc(temperature);
             set_values(int_temp, trunc((temperature - int_temp) * 100));
