@@ -88,14 +88,31 @@ bool bmp_ok = false; // true after sucessful init
 // Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
 RotaryEncoder encoder(ROTARY_1, ROTARY_2, RotaryEncoder::LatchMode::TWO03);
 
-volatile bool mode_change = false;
-volatile unsigned long mode_switch_time = 0;
+volatile bool control_mode_change = false;
+volatile unsigned long control_mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
 
+volatile ControlMode control_mode = info;
+
 ICACHE_RAM_ATTR void mode_switch() {
-    if (abs(millis() - mode_switch_time) > MODE_SWITCH_INTERVAL) {
-        mode_change = true;
-        mode_switch_time = millis();
+    if (abs(millis() - control_mode_switch_time) > MODE_SWITCH_INTERVAL) {
+        switch (control_mode) {
+        case info:
+            control_mode = display_intensity;
+            break;
+        case display_intensity:
+            control_mode = color;
+            break;
+        case color:
+            control_mode = led_intensity;
+            break;
+        case led_intensity:
+            control_mode = info;
+            break;
+        default:
+            break;
+        }
+        control_mode_switch_time = millis();
     }
 }
 
@@ -210,33 +227,67 @@ void display(bool fade = false) {
     set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
 }
 
-/**
- * Return true if the display_mode changed and update the display_mode global.
- */
-bool check_mode_switch() {
-    if (mode_change) {
-        switch (display_mode) {
-        case hours_mins:
-            display_mode = mins_secs;
+bool check_control_mode_switch() {
+    if (control_mode_change) {
+        switch (control_mode) {
+        case info:
+            control_mode = display_intensity;
             break;
-        case mins_secs:
-            display_mode = temperature;
+        case display_intensity:
+            control_mode = color;
             break;
-        case temperature:
-            display_mode = pressure;
+        case color:
+            control_mode = led_intensity;
             break;
-        case pressure:
-            display_mode = hours_mins;
+        case led_intensity:
+            control_mode = info;
             break;
         default:
-            display_mode = hours_mins;
             break;
         }
-        mode_change = false;
+        control_mode_change = false;
         return true;
     }
 
     return false;
+}
+
+void display_mode_forward() {
+    switch (display_mode) {
+    case hours_mins:
+        display_mode = mins_secs;
+        break;
+    case mins_secs:
+        display_mode = temperature;
+        break;
+    case temperature:
+        display_mode = pressure;
+        break;
+    case pressure:
+        display_mode = hours_mins;
+        break;
+    default:
+        break;
+    }
+}
+
+void display_mode_backward() {
+    switch (display_mode) {
+    case hours_mins:
+        display_mode = pressure;
+        break;
+    case mins_secs:
+        display_mode = hours_mins;
+        break;
+    case temperature:
+        display_mode = mins_secs;
+        break;
+    case pressure:
+        display_mode = temperature;
+        break;
+    default:
+        break;
+    }
 }
 
 void show_color() {
@@ -335,7 +386,7 @@ long pos = 0;
 
 void loop() {
     // Test the rotary encoder and update brightness
-    encoder.tick();
+#if 0
     long newPos = encoder.getPosition();
     if (newPos != pos) {
         brightness += 5*(newPos - pos);
@@ -348,89 +399,172 @@ void loop() {
 
         pos = newPos;
     } 
+#endif
 
     DateTime now(RTC.now());
 
-    // If we switched modes, update the display
-    if (check_mode_switch()) {
-        switch (display_mode) {
-        case hours_mins:
-            set_values(now.hour(), now.minute());
-            break;
+    encoder.tick(); // Improves respnsiveness
 
-        case mins_secs:
-            set_values(now.minute(), now.second());
-            break;
+        switch(control_mode) {
+        case info: {
+        long newPos = encoder.getPosition();
+        if (newPos != pos) { 
+            if (newPos > pos) display_mode_forward();
+            else if (newPos < pos) display_mode_backward();
 
-        case temperature: {
-            float temperature = get_temp();
-            unsigned int int_temp = trunc(temperature);
-            set_values(int_temp, trunc((temperature - int_temp) * 100));
-            break;
+            pos = newPos;
+
+            switch(display_mode) {
+            case hours_mins:
+                set_values(now.hour(), now.minute());
+                break;
+
+            case mins_secs:
+                set_values(now.minute(), now.second());
+                break;
+
+            case temperature: {
+                float temperature = get_temp();
+                unsigned int int_temp = trunc(temperature);
+                set_values(int_temp, trunc((temperature - int_temp) * 100));
+                break;
+            }
+
+            case pressure: {
+                float pressure = get_sea_level_pressure(); // get_pressure();
+                unsigned int int_press = trunc(pressure);
+                set_values(int_press, trunc((pressure - int_press) * 100));
+                break;
+            }
+
+            default:
+                set_values(now.hour(), now.minute());
+                break;
+            }
+
+            display(true);
+            save_values();
         }
-
-        case pressure: {
-            float pressure = get_sea_level_pressure(); // get_pressure();
-            unsigned int int_press = trunc(pressure);
-            set_values(int_press, trunc((pressure - int_press) * 100));
-            break;
         }
+        break;
+
+        case display_intensity: {
+            long newPos = encoder.getPosition();
+            if (newPos != pos) {
+                brightness += 5*(newPos - pos);
+                if (brightness > 127)
+                    brightness = 127;
+                else if (brightness < 0)
+                    brightness = 0;
+
+                display(false);
+
+                pos = newPos;
+            } 
+        }
+        break;
+
+        case color:
+        break;
+
+        case led_intensity:
+        break;
 
         default:
-            set_values(now.hour(), now.minute());
-            break;
-        }
-
-        display(true);
-        save_values();
-        mode_switch_time = millis();
-
-    } else {
-        unsigned int digit = 0;
-        switch (display_mode) {
-        case hours_mins:
-            set_values(now.hour(), now.minute());
-
-            if ((digit = values_changed())) {
-                digit_crossfade(digit);
-                save_values();
-            }
-            break;
-
-        case mins_secs:
-            set_values(now.minute(), now.second());
-            if ((digit = values_changed())) {
-                digit_crossfade(digit);
-                save_values();
-            }
-            break;
-
-        case temperature: {
-            float temperature = get_temp();
-            unsigned int int_temp = trunc(temperature);
-            set_values(int_temp, trunc((temperature - int_temp) * 100));
-            if ((digit = values_changed())) {
-                digit_crossfade(digit);
-                save_values();
-            }
-            break;
-        }
-
-        case pressure: {
-            float pressure = get_sea_level_pressure(); // get_pressure();
-            unsigned int int_press = trunc(pressure);
-            set_values(int_press, trunc((pressure - int_press) * 100));
-            if ((digit = values_changed())) {
-                digit_crossfade(digit);
-                save_values();
-            }
-            break;
-        }
-        default:
-            break;
-        }
+        break;
     }
 
+#if 0
+    if (control_mode == info) {
+        long newPos = encoder.getPosition();
+        if (newPos != pos) { 
+            if (newPos > pos) display_mode_forward();
+            else if (newPos < pos) display_mode_backward();
+
+            pos = newPos;
+
+            switch(display_mode) {
+            case hours_mins:
+                set_values(now.hour(), now.minute());
+                break;
+
+            case mins_secs:
+                set_values(now.minute(), now.second());
+                break;
+
+            case temperature: {
+                float temperature = get_temp();
+                unsigned int int_temp = trunc(temperature);
+                set_values(int_temp, trunc((temperature - int_temp) * 100));
+                break;
+            }
+
+            case pressure: {
+                float pressure = get_sea_level_pressure(); // get_pressure();
+                unsigned int int_press = trunc(pressure);
+                set_values(int_press, trunc((pressure - int_press) * 100));
+                break;
+            }
+
+            default:
+                set_values(now.hour(), now.minute());
+                break;
+            }
+
+            display(true);
+            save_values();
+        } else {
+#endif
+
+    unsigned int digit = 0;
+    switch (display_mode) {
+    case hours_mins:
+        set_values(now.hour(), now.minute());
+
+        if ((digit = values_changed())) {
+            digit_crossfade(digit);
+            save_values();
+        }
+        break;
+
+    case mins_secs:
+        set_values(now.minute(), now.second());
+        if ((digit = values_changed())) {
+            digit_crossfade(digit);
+            save_values();
+        }
+        break;
+
+    case temperature: {
+        float temperature = get_temp();
+        unsigned int int_temp = trunc(temperature);
+        set_values(int_temp, trunc((temperature - int_temp) * 100));
+        if ((digit = values_changed())) {
+            digit_crossfade(digit);
+            save_values();
+        }
+        break;
+    }
+
+    case pressure: {
+        float pressure = get_sea_level_pressure(); // get_pressure();
+        unsigned int int_press = trunc(pressure);
+        set_values(int_press, trunc((pressure - int_press) * 100));
+        if ((digit = values_changed())) {
+            digit_crossfade(digit);
+            save_values();
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+#if 0
+        }
+
+    }
+#endif
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
 
