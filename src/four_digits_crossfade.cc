@@ -76,7 +76,7 @@ enum ControlMode {
     led_intensity = 3
 };
 
-DisplayMode display_mode = hours_mins;
+volatile DisplayMode display_mode = hours_mins;
 
 Adafruit_BMP085 bmp;
 
@@ -88,8 +88,8 @@ bool bmp_ok = false; // true after sucessful init
 // Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
 RotaryEncoder encoder(ROTARY_1, ROTARY_2, RotaryEncoder::LatchMode::TWO03);
 
-bool mode_change = false;
-unsigned long mode_switch_time = 0;
+volatile bool mode_change = false;
+volatile unsigned long mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
 
 ICACHE_RAM_ATTR void mode_switch() {
@@ -214,29 +214,26 @@ void display(bool fade = false) {
  * Return true if the display_mode changed and update the display_mode global.
  */
 bool check_mode_switch() {
-    if (mode_change) { // digitalRead(MODE_SWITCH) == LOW) {
-        //delay(100);
-        //if (digitalRead(MODE_SWITCH) == LOW) {
-            switch (display_mode) {
-            case hours_mins:
-                display_mode = mins_secs;
-                break;
-            case mins_secs:
-                display_mode = temperature;
-                break;
-            case temperature:
-                display_mode = pressure;
-                break;
-            case pressure:
-                display_mode = hours_mins;
-                break;
-            default:
-                display_mode = hours_mins;
-                break;
-            }
-            mode_change = false;
-            return true;
-        //}
+    if (mode_change) {
+        switch (display_mode) {
+        case hours_mins:
+            display_mode = mins_secs;
+            break;
+        case mins_secs:
+            display_mode = temperature;
+            break;
+        case temperature:
+            display_mode = pressure;
+            break;
+        case pressure:
+            display_mode = hours_mins;
+            break;
+        default:
+            display_mode = hours_mins;
+            break;
+        }
+        mode_change = false;
+        return true;
     }
 
     return false;
@@ -338,6 +335,7 @@ long pos = 0;
 
 void loop() {
     // Test the rotary encoder and update brightness
+    encoder.tick();
     long newPos = encoder.getPosition();
     if (newPos != pos) {
         brightness += 5*(newPos - pos);
@@ -357,17 +355,14 @@ void loop() {
     if (check_mode_switch()) {
         switch (display_mode) {
         case hours_mins:
-            Serial.println("in check_mode_switch() hours_mins");
             set_values(now.hour(), now.minute());
             break;
 
         case mins_secs:
-            Serial.println("in check_mode_switch() mins_secs");
             set_values(now.minute(), now.second());
             break;
 
         case temperature: {
-            Serial.println("in check_mode_switch() temperature");
             float temperature = get_temp();
             unsigned int int_temp = trunc(temperature);
             set_values(int_temp, trunc((temperature - int_temp) * 100));
@@ -388,6 +383,7 @@ void loop() {
 
         display(true);
         save_values();
+        mode_switch_time = millis();
 
     } else {
         unsigned int digit = 0;
