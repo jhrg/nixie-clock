@@ -13,8 +13,8 @@
 #include <Arduino.h>
 
 #include <RTClibExtended.h>
-#include <Wire.h>
 #include <RotaryEncoder.h>
+#include <Wire.h>
 
 #include <Adafruit_BMP085.h>
 
@@ -57,7 +57,7 @@ unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
 unsigned int brightness = 127; // 0 - 127
-unsigned int fade_time = 15;  // 30 frames = 1 second
+unsigned int fade_time = 15;   // 30 frames = 1 second
 
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
@@ -325,7 +325,7 @@ void setup() {
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
-    
+
     // Rotary encoder
     attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
@@ -334,7 +334,7 @@ void setup() {
     pinMode(digit_2_cs, OUTPUT);
     pinMode(digit_3_cs, OUTPUT);
     pinMode(digit_4_cs, OUTPUT);
-    
+
     // Setup the I2C bus for the DS3231 clock
     // On the NodeMCU, GPIOR04 is D2, GPIOR05 is D1
     int sda = GPIO04;
@@ -386,35 +386,23 @@ long pos = 0;
 
 void loop() {
     // Test the rotary encoder and update brightness
-#if 0
-    long newPos = encoder.getPosition();
-    if (newPos != pos) {
-        brightness += 5*(newPos - pos);
-        if (brightness > 127)
-            brightness = 127;
-        else if (brightness < 0)
-            brightness = 0;
-
-        display(false);
-
-        pos = newPos;
-    } 
-#endif
 
     DateTime now(RTC.now());
 
     encoder.tick(); // Improves respnsiveness
 
-        switch(control_mode) {
-        case info: {
+    switch (control_mode) {
+    case info: {
         long newPos = encoder.getPosition();
-        if (newPos != pos) { 
-            if (newPos > pos) display_mode_forward();
-            else if (newPos < pos) display_mode_backward();
+        if (newPos != pos) {
+            if (newPos > pos)
+                display_mode_forward();
+            else if (newPos < pos)
+                display_mode_backward();
 
             pos = newPos;
 
-            switch(display_mode) {
+            switch (display_mode) {
             case hours_mins:
                 set_values(now.hour(), now.minute());
                 break;
@@ -445,76 +433,34 @@ void loop() {
             display(true);
             save_values();
         }
-        }
-        break;
-
-        case display_intensity: {
-            long newPos = encoder.getPosition();
-            if (newPos != pos) {
-                brightness += 5*(newPos - pos);
-                if (brightness > 127)
-                    brightness = 127;
-                else if (brightness < 0)
-                    brightness = 0;
-
-                display(false);
-
-                pos = newPos;
-            } 
-        }
-        break;
-
-        case color:
-        break;
-
-        case led_intensity:
-        break;
-
-        default:
         break;
     }
 
-#if 0
-    if (control_mode == info) {
+    case display_intensity: {
         long newPos = encoder.getPosition();
-        if (newPos != pos) { 
-            if (newPos > pos) display_mode_forward();
-            else if (newPos < pos) display_mode_backward();
+        if (newPos != pos) {
+            brightness += 5 * (newPos - pos);
+            if (brightness > 127)
+                brightness = 127;
+            else if (brightness < 0)
+                brightness = 0;
+
+            display(false);
 
             pos = newPos;
+        }
+        break;
+    }
 
-            switch(display_mode) {
-            case hours_mins:
-                set_values(now.hour(), now.minute());
-                break;
+    case color:
+        break;
 
-            case mins_secs:
-                set_values(now.minute(), now.second());
-                break;
+    case led_intensity:
+        break;
 
-            case temperature: {
-                float temperature = get_temp();
-                unsigned int int_temp = trunc(temperature);
-                set_values(int_temp, trunc((temperature - int_temp) * 100));
-                break;
-            }
-
-            case pressure: {
-                float pressure = get_sea_level_pressure(); // get_pressure();
-                unsigned int int_press = trunc(pressure);
-                set_values(int_press, trunc((pressure - int_press) * 100));
-                break;
-            }
-
-            default:
-                set_values(now.hour(), now.minute());
-                break;
-            }
-
-            display(true);
-            save_values();
-        } else {
-#endif
+    default:
+        break;
+    }
 
     unsigned int digit = 0;
     switch (display_mode) {
