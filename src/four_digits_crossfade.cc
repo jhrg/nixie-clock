@@ -56,8 +56,17 @@ exixe *tubes[NUM_TUBES];
 unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
-unsigned int brightness = 127; // 0 - 127
+// brightness, led_brightness and color_index are adjusted by the
+// rotary encoder and can be negative 
+int brightness = 127; // tube brightness, 0 - 127
 unsigned int fade_time = 15;   // 30 frames = 1 second
+int led_brightness = 64; // 0 - 127
+
+#define NUM_COLORS 3
+unsigned int red[NUM_COLORS] = {127, 0, 0};
+unsigned int green[NUM_COLORS] = {0, 127, 0};
+unsigned int blue[NUM_COLORS] = {0, 0, 127};
+int color_index = 2;
 
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
@@ -116,8 +125,12 @@ ICACHE_RAM_ATTR void mode_switch() {
     }
 }
 
+volatile unsigned long rotary_change_time = 0;
+#define ROTARY_INTERVAL 10 // ms
+
 ICACHE_RAM_ATTR void rotary_encoder() {
-    encoder.tick();
+    if (millis() - rotary_change_time > ROTARY_INTERVAL)
+        encoder.tick();
 }
 
 /**
@@ -291,10 +304,15 @@ void display_mode_backward() {
 }
 
 void show_color() {
-    digit_1.set_led(0, 0, 32);
-    digit_2.set_led(0, 0, 32);
-    digit_3.set_led(0, 0, 32);
-    digit_4.set_led(0, 0, 32);
+    float scale_factor =  (led_brightness/127.0);
+    unsigned int r = red[color_index] * scale_factor;
+    unsigned int g = green[color_index] * scale_factor;
+    unsigned int b = blue[color_index] * scale_factor;
+    
+    digit_1.set_led(r, g, b);
+    digit_2.set_led(r, g, b);
+    digit_3.set_led(r, g, b);
+    digit_4.set_led(r, g, b);
 }
 
 /**
@@ -324,9 +342,12 @@ float get_pressure() {
 void setup() {
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
+    pinMode(MODE_SWITCH, INPUT);
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
 
     // Rotary encoder
+    pinMode(ROTARY_1, INPUT_PULLUP);
+    pinMode(ROTARY_2, INPUT_PULLUP);
     attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
 
@@ -452,11 +473,37 @@ void loop() {
         break;
     }
 
-    case color:
-        break;
+    case color:{
+        long newPos = encoder .getPosition();
+        if (newPos != pos) {
+            color_index += (newPos - pos);
+            if (color_index == NUM_COLORS)
+                color_index = 0;
+            else if (color_index < 0)
+                color_index = NUM_COLORS - 1;
 
-    case led_intensity:
+            show_color();
+
+            pos = newPos;
+        }
         break;
+    }
+
+    case led_intensity: {
+        long newPos = encoder.getPosition();
+        if (newPos != pos) {
+            led_brightness += 5 * (newPos - pos);
+            if (led_brightness > 127)
+                led_brightness = 127;
+            else if (led_brightness < 0)
+                led_brightness = 0;
+
+            show_color();
+
+            pos = newPos;
+        }
+        break;
+    }
 
     default:
         break;
@@ -506,13 +553,8 @@ void loop() {
         break;
     }
 
-#if 0
-        }
-
-    }
-#endif
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
 
-    delay(100); // 0.1s
+    // delay(10); // 0.01s
 }
