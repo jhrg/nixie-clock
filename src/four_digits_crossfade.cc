@@ -105,7 +105,7 @@ volatile ControlMode control_mode = info;
 
 ICACHE_RAM_ATTR void mode_switch() {
     cli();
-    if (abs(millis() - control_mode_switch_time) > MODE_SWITCH_INTERVAL) {
+    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         switch (control_mode) {
         case info:
             control_mode = display_intensity;
@@ -129,15 +129,14 @@ ICACHE_RAM_ATTR void mode_switch() {
 
 volatile unsigned long rotary_change_time = 0;
 #define ROTARY_INTERVAL 3 // ms
-bool left_dot = false;
-bool right_dot = false;
 
 ICACHE_RAM_ATTR void rotary_encoder() {
     cli();
 
     // only record one tick per iteration of the main loop
 #if 1
-    if (millis() > (rotary_change_time + ROTARY_INTERVAL)) {
+    if (millis() > (rotary_change_time + ROTARY_INTERVAL)
+        && encoder.getPosition() == pos) {
         encoder.tick();
         rotary_change_time = millis();
     }
@@ -500,7 +499,6 @@ void loop() {
     DateTime now(RTC.now());
 
     // Test the rotary encoder and update brightness
-    //encoder.tick(); // Poll instead of interrupts
     long newPos = encoder.getPosition();
 
     switch (control_mode) {
@@ -654,6 +652,4 @@ void loop() {
 
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
-
-    // delay(10); // 0.01s
 }
