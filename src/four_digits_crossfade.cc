@@ -128,7 +128,7 @@ ICACHE_RAM_ATTR void mode_switch() {
 }
 
 volatile unsigned long rotary_change_time = 0;
-#define ROTARY_INTERVAL 2 // ms
+#define ROTARY_INTERVAL 3 // ms
 bool left_dot = false;
 bool right_dot = false;
 
@@ -136,13 +136,14 @@ ICACHE_RAM_ATTR void rotary_encoder() {
     cli();
 
     // only record one tick per iteration of the main loop
-    if (encoder.getPosition() == pos)
-        encoder.tick();
-#if 0        
-   if (millis() > (rotary_change_time + ROTARY_INTERVAL)) {
+#if 1
+    if (millis() > (rotary_change_time + ROTARY_INTERVAL)) {
         encoder.tick();
         rotary_change_time = millis();
     }
+#else
+    if (encoder.getPosition() == pos)
+        encoder.tick();
 #endif
 
     sei();
