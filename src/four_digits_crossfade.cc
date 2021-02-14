@@ -24,21 +24,18 @@
 #define GPIO05 5
 
 #define MODE_SWITCH D8
-#define ROTARY_1 D3
-#define ROTARY_2 D4
+#define ROTARY_CLK D3 // CLOCK
+#define ROTARY_DAT D4 // DATA
 
 #define digit_1_cs 1
 #define digit_2_cs 3
 #define digit_3_cs 10
 #define digit_4_cs 16
 
-// Number opf seconds it takes to compile, upload and run this program
-// at 9600 baud. Used to adjust the clock
-#define TIME_OFFSET 12
-
 #define BAUD_RATE 115200
 
-#define INITIAL_FADE_TIME 250 // ms, time to fade in a digit when modes change
+#define INITIAL_FADE_TIME 250             // ms, time to fade in a digit when modes change
+#define MEASUREMENT_UPDATE_INTERVAL 10000 // 10s
 
 // Clock digits, left to right
 exixe digit_1 = exixe(digit_1_cs);
@@ -57,10 +54,10 @@ unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
 // brightness, led_brightness and color_index are adjusted by the
-// rotary encoder and can be negative 
-int brightness = 127; // tube brightness, 0 - 127
-unsigned int fade_time = 15;   // 30 frames = 1 second
-int led_brightness = 64; // 0 - 127
+// rotary encoder and can be negative
+int brightness = 127;        // tube brightness, 0 - 127
+unsigned int fade_time = 15; // 30 frames = 1 second
+int led_brightness = 64;     // 0 - 127
 
 #define NUM_COLORS 3
 unsigned int red[NUM_COLORS] = {127, 0, 0};
@@ -95,7 +92,10 @@ bool bmp_ok = false; // true after sucessful init
 // RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
 
 // Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
-RotaryEncoder encoder(ROTARY_1, ROTARY_2, RotaryEncoder::LatchMode::TWO03);
+RotaryEncoder encoder(ROTARY_CLK, ROTARY_DAT, RotaryEncoder::LatchMode::TWO03);
+
+// Current encoder position
+long pos = 0;
 
 volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
@@ -104,6 +104,7 @@ volatile unsigned long control_mode_switch_time = 0;
 volatile ControlMode control_mode = info;
 
 ICACHE_RAM_ATTR void mode_switch() {
+    cli();
     if (abs(millis() - control_mode_switch_time) > MODE_SWITCH_INTERVAL) {
         switch (control_mode) {
         case info:
@@ -123,14 +124,28 @@ ICACHE_RAM_ATTR void mode_switch() {
         }
         control_mode_switch_time = millis();
     }
+    sei();
 }
 
 volatile unsigned long rotary_change_time = 0;
-#define ROTARY_INTERVAL 10 // ms
+#define ROTARY_INTERVAL 2 // ms
+bool left_dot = false;
+bool right_dot = false;
 
 ICACHE_RAM_ATTR void rotary_encoder() {
-    if (millis() - rotary_change_time > ROTARY_INTERVAL)
+    cli();
+
+    // only record one tick per iteration of the main loop
+    if (encoder.getPosition() == pos)
         encoder.tick();
+#if 0        
+   if (millis() > (rotary_change_time + ROTARY_INTERVAL)) {
+        encoder.tick();
+        rotary_change_time = millis();
+    }
+#endif
+
+    sei();
 }
 
 /**
@@ -218,7 +233,7 @@ void digit_crossfade(unsigned int count) {
 void set_digit(int count, exixe *tube, bool fade) {
     if (fade) {
         unsigned int delta = ceil(INITIAL_FADE_TIME / brightness);
-        for (unsigned int b = 0; b < brightness + 1; b++) {
+        for (int b = 0; b < brightness + 1; b++) {
             tube->show_digit(count, b, 0);
             delay(delta);
         }
@@ -303,12 +318,83 @@ void display_mode_backward() {
     }
 }
 
+#define MAX_COLOR_VALUE 127
+
+int red_value = MAX_COLOR_VALUE;
+int green_value = 0;
+int blue_value = 0;
+
+enum ColorState {
+    red_to_yellow = 0,
+    yellow_to_green = 1,
+    green_to_blue = 2,
+    blue_to_red = 3
+};
+
+ColorState color_state = red_to_yellow;
+
+void change_color(int steps) {
+    switch (color_state) {
+    case red_to_yellow:
+        red_value = MAX_COLOR_VALUE;
+        green_value += steps;
+        if (green_value > MAX_COLOR_VALUE) {
+            green_value = MAX_COLOR_VALUE;
+            color_state = yellow_to_green;
+        }
+        break;
+
+    case yellow_to_green:
+        green_value = MAX_COLOR_VALUE;
+        red_value -= steps;
+        if (red_value <= 0) {
+            red_value = 0;
+            color_state = green_to_blue;
+        }
+        break;
+
+    case green_to_blue:
+        red_value = 0;
+        green_value -= steps;
+        if (green_value < 0)
+            green_value = 0;
+        blue_value += steps;
+        if (blue_value > MAX_COLOR_VALUE) {
+            blue_value = MAX_COLOR_VALUE;
+            color_state = blue_to_red;
+        }
+        break;
+
+    case blue_to_red:
+        green_value = 0;
+        blue_value -= steps;
+        if (blue_value < 0)
+            blue_value = 0;
+        red_value += steps;
+        if (red_value > MAX_COLOR_VALUE) {
+            red_value = MAX_COLOR_VALUE;
+            color_state = red_to_yellow;
+        }
+        break;
+    }
+    // 255, green 0 .. 255, blue 0; // red to orange to yellow
+    // red 255 .. 0, green 255, blue 0; // yellow to green
+    // red 0, green 255 .. 0, blue 0 ..255 // green to blue
+    // red 0 .. 255, green 0, blue 255 .. 0 // blue to purple to red again
+}
+
 void show_color() {
-    float scale_factor =  (led_brightness/127.0);
+    float scale_factor = (led_brightness / 127.0);
+#if 0
     unsigned int r = red[color_index] * scale_factor;
     unsigned int g = green[color_index] * scale_factor;
     unsigned int b = blue[color_index] * scale_factor;
-    
+#else
+    unsigned int r = red_value * scale_factor;
+    unsigned int g = green_value * scale_factor;
+    unsigned int b = blue_value * scale_factor;
+#endif
+
     digit_1.set_led(r, g, b);
     digit_2.set_led(r, g, b);
     digit_3.set_led(r, g, b);
@@ -345,11 +431,11 @@ void setup() {
     pinMode(MODE_SWITCH, INPUT);
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
 
-    // Rotary encoder
-    pinMode(ROTARY_1, INPUT_PULLUP);
-    pinMode(ROTARY_2, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(ROTARY_1), rotary_encoder, CHANGE);
+    // Rotary encoder - INPUT_PULLUP set by the rotary encode ctor
+    //pinMode(ROTARY_CLK, INPUT_PULLUP);
+    //pinMode(ROTARY_DAT, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotary_encoder, CHANGE);
+    attachInterrupt(digitalPinToInterrupt(ROTARY_DAT), rotary_encoder, CHANGE);
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
@@ -365,6 +451,8 @@ void setup() {
     if (bmp.begin()) {
         bmp_ok = true;
     }
+
+    RTC.begin(); // always returns true
 
 #if ADJUST_TIME
     // Run this here, before serial configuration to shorten the delay
@@ -403,18 +491,19 @@ void setup() {
     display(true);
 }
 
-long pos = 0;
+unsigned long temperature_update_time = 0;
+unsigned long pressure_update_time = 0;
 
 void loop() {
-    // Test the rotary encoder and update brightness
 
     DateTime now(RTC.now());
 
-    encoder.tick(); // Improves respnsiveness
+    // Test the rotary encoder and update brightness
+    //encoder.tick(); // Poll instead of interrupts
+    long newPos = encoder.getPosition();
 
     switch (control_mode) {
     case info: {
-        long newPos = encoder.getPosition();
         if (newPos != pos) {
             if (newPos > pos)
                 display_mode_forward();
@@ -433,6 +522,7 @@ void loop() {
                 break;
 
             case temperature: {
+                temperature_update_time = millis();
                 float temperature = get_temp();
                 unsigned int int_temp = trunc(temperature);
                 set_values(int_temp, trunc((temperature - int_temp) * 100));
@@ -440,6 +530,7 @@ void loop() {
             }
 
             case pressure: {
+                pressure_update_time = millis();
                 float pressure = get_sea_level_pressure(); // get_pressure();
                 unsigned int int_press = trunc(pressure);
                 set_values(int_press, trunc((pressure - int_press) * 100));
@@ -458,7 +549,6 @@ void loop() {
     }
 
     case display_intensity: {
-        long newPos = encoder.getPosition();
         if (newPos != pos) {
             brightness += 5 * (newPos - pos);
             if (brightness > 127)
@@ -473,15 +563,17 @@ void loop() {
         break;
     }
 
-    case color:{
-        long newPos = encoder .getPosition();
+    case color: {
         if (newPos != pos) {
+            change_color((newPos - pos) * 10);
+#if 0
             color_index += (newPos - pos);
+
             if (color_index == NUM_COLORS)
                 color_index = 0;
             else if (color_index < 0)
                 color_index = NUM_COLORS - 1;
-
+#endif
             show_color();
 
             pos = newPos;
@@ -490,7 +582,6 @@ void loop() {
     }
 
     case led_intensity: {
-        long newPos = encoder.getPosition();
         if (newPos != pos) {
             led_brightness += 5 * (newPos - pos);
             if (led_brightness > 127)
@@ -529,6 +620,10 @@ void loop() {
         break;
 
     case temperature: {
+        // less display flicker
+        if (temperature_update_time + MEASUREMENT_UPDATE_INTERVAL > millis())
+            break;
+        temperature_update_time = millis();
         float temperature = get_temp();
         unsigned int int_temp = trunc(temperature);
         set_values(int_temp, trunc((temperature - int_temp) * 100));
@@ -540,6 +635,9 @@ void loop() {
     }
 
     case pressure: {
+        if (pressure_update_time + MEASUREMENT_UPDATE_INTERVAL > millis())
+            break;
+        pressure_update_time = millis();
         float pressure = get_sea_level_pressure(); // get_pressure();
         unsigned int int_press = trunc(pressure);
         set_values(int_press, trunc((pressure - int_press) * 100));
