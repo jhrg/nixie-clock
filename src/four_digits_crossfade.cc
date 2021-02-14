@@ -59,12 +59,6 @@ int brightness = 127;        // tube brightness, 0 - 127
 unsigned int fade_time = 15; // 30 frames = 1 second
 int led_brightness = 64;     // 0 - 127
 
-#define NUM_COLORS 3
-unsigned int red[NUM_COLORS] = {127, 0, 0};
-unsigned int green[NUM_COLORS] = {0, 127, 0};
-unsigned int blue[NUM_COLORS] = {0, 0, 127};
-int color_index = 2;
-
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
 
@@ -135,8 +129,7 @@ ICACHE_RAM_ATTR void rotary_encoder() {
 
     // only record one tick per iteration of the main loop
 #if 1
-    if (millis() > (rotary_change_time + ROTARY_INTERVAL)
-        && encoder.getPosition() == pos) {
+    if (millis() > (rotary_change_time + ROTARY_INTERVAL) && encoder.getPosition() == pos) {
         encoder.tick();
         rotary_change_time = millis();
     }
@@ -324,16 +317,28 @@ int red_value = MAX_COLOR_VALUE;
 int green_value = 0;
 int blue_value = 0;
 
-enum ColorState {
-    red_to_yellow = 0,
-    yellow_to_green = 1,
-    green_to_blue = 2,
-    blue_to_red = 3
-};
-
-ColorState color_state = red_to_yellow;
-
+/**
+ * Cycle through the colors of the rainbow. If steps is positive,
+ * move from red toward blue to purple and back to red again. If
+ * steps is negative, move in the opposite direction. The global 
+ * variables red_, blue_ and green_value are modified.
+ */
 void change_color(int steps) {
+    // Here are the component color values used:
+    // 255, green 0 .. 255, blue 0; red to orange to yellow
+    // red 255 .. 0, green 255, blue 0; yellow to green
+    // red 0, green 255 .. 0, blue 0 ..255; green to blue
+    // red 0 .. 255, green 0, blue 255 .. 0; blue to purple to red again
+
+    enum ColorState {
+        red_to_yellow = 0,
+        yellow_to_green = 1,
+        green_to_blue = 2,
+        blue_to_red = 3
+    };
+
+    static ColorState color_state = red_to_yellow;
+
     switch (color_state) {
     case red_to_yellow:
         red_value = MAX_COLOR_VALUE;
@@ -341,6 +346,9 @@ void change_color(int steps) {
         if (green_value > MAX_COLOR_VALUE) {
             green_value = MAX_COLOR_VALUE;
             color_state = yellow_to_green;
+        } else if (green_value < 0) {
+            green_value = 0;
+            color_state = blue_to_red;
         }
         break;
 
@@ -350,6 +358,9 @@ void change_color(int steps) {
         if (red_value <= 0) {
             red_value = 0;
             color_state = green_to_blue;
+        } else if (red_value > MAX_COLOR_VALUE) {
+            red_value = MAX_COLOR_VALUE;
+            color_state = red_to_yellow;
         }
         break;
 
@@ -362,6 +373,9 @@ void change_color(int steps) {
         if (blue_value > MAX_COLOR_VALUE) {
             blue_value = MAX_COLOR_VALUE;
             color_state = blue_to_red;
+        } else if (blue_value < 0) {
+            blue_value = 0;
+            color_state = yellow_to_green;
         }
         break;
 
@@ -374,26 +388,19 @@ void change_color(int steps) {
         if (red_value > MAX_COLOR_VALUE) {
             red_value = MAX_COLOR_VALUE;
             color_state = red_to_yellow;
+        } else if (red_value < 0) {
+            red_value = 0;
+            color_state = green_to_blue;
         }
         break;
     }
-    // 255, green 0 .. 255, blue 0; // red to orange to yellow
-    // red 255 .. 0, green 255, blue 0; // yellow to green
-    // red 0, green 255 .. 0, blue 0 ..255 // green to blue
-    // red 0 .. 255, green 0, blue 255 .. 0 // blue to purple to red again
 }
 
 void show_color() {
     float scale_factor = (led_brightness / 127.0);
-#if 0
-    unsigned int r = red[color_index] * scale_factor;
-    unsigned int g = green[color_index] * scale_factor;
-    unsigned int b = blue[color_index] * scale_factor;
-#else
     unsigned int r = red_value * scale_factor;
     unsigned int g = green_value * scale_factor;
     unsigned int b = blue_value * scale_factor;
-#endif
 
     digit_1.set_led(r, g, b);
     digit_2.set_led(r, g, b);
@@ -565,14 +572,6 @@ void loop() {
     case color: {
         if (newPos != pos) {
             change_color((newPos - pos) * 10);
-#if 0
-            color_index += (newPos - pos);
-
-            if (color_index == NUM_COLORS)
-                color_index = 0;
-            else if (color_index < 0)
-                color_index = NUM_COLORS - 1;
-#endif
             show_color();
 
             pos = newPos;
@@ -619,7 +618,7 @@ void loop() {
         break;
 
     case temperature: {
-        // less display flicker
+        // reduce display flicker
         if (temperature_update_time + MEASUREMENT_UPDATE_INTERVAL > millis())
             break;
         temperature_update_time = millis();
