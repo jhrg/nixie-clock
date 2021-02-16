@@ -1,4 +1,6 @@
 /*
+  Four digit clock. Hour/Mins, Mins/Seconds, Temp, Sea-level Pressure
+  
   exixe modules:
   https://github.com/dekuNukem/exixe
 
@@ -7,7 +9,7 @@
 
   Based on Demo 3: Loop digits with crossfade animation
 
-  Four digit simple clock
+  jhrg
 */
 
 #include <Arduino.h>
@@ -84,14 +86,8 @@ Adafruit_BMP085 bmp;
 
 bool bmp_ok = false; // true after sucessful init
 
-// Setup a RotaryEncoder with 4 steps per latch for the 2 signal input pins:
-// RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
-
-// Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
-// RotaryEncoder encoder(ROTARY_CLK, ROTARY_DAT, RotaryEncoder::LatchMode::TWO03);
-
 // Current encoder position
-long pos = 0;
+long encoder_position = 0;
 
 // volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
@@ -101,7 +97,7 @@ volatile ControlMode control_mode = info;
 volatile ControlMode prev_control_mode = info;
 
 /**
- * Process the rising edge of the mode switch. 
+ * Process the falling edge of the mode switch. 
  * 
  * Do not update the mode display here since this might interrupt
  * the write to a digit and doing so would 'steal' the CS, leading
@@ -132,28 +128,6 @@ ICACHE_RAM_ATTR void mode_switch() {
     }
     sei();
 }
-
-#if 0
-volatile unsigned long rotary_change_time = 0;
-#define ROTARY_INTERVAL 3 // ms
-
-ICACHE_RAM_ATTR void rotary_encoder() {
-    cli();
-#if 0
-    // only record one tick per iteration of the main loop
-#if 1
-    if (millis() > (rotary_change_time + ROTARY_INTERVAL) && encoder.getPosition() == pos) {
-        encoder.tick();
-        rotary_change_time = millis();
-    }
-#else
-    if (encoder.getPosition() == pos)
-        encoder.tick();
-#endif
-#endif
-    sei();
-}
-#endif
 
 /**
  * Copy the values[] array to the old_values[] array
@@ -258,33 +232,6 @@ void display(bool fade = false) {
     set_digit(values[DIGIT_3], tubes[DIGIT_3], fade);
     set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
 }
-
-#if 0
-bool check_control_mode_switch() {
-    if (control_mode_change) {
-        switch (control_mode) {
-        case info:
-            control_mode = display_intensity;
-            break;
-        case display_intensity:
-            control_mode = color;
-            break;
-        case color:
-            control_mode = led_intensity;
-            break;
-        case led_intensity:
-            control_mode = info;
-            break;
-        default:
-            break;
-        }
-        control_mode_change = false;
-        return true;
-    }
-
-    return false;
-}
-#endif
 
 void display_mode_forward() {
     switch (display_mode) {
@@ -540,13 +487,13 @@ void loop() {
 
     switch (control_mode) {
     case info: {
-        if (newPos != pos) {
-            if (newPos > pos)
+        if (newPos != encoder_position) {
+            if (newPos > encoder_position)
                 display_mode_forward();
-            else if (newPos < pos)
+            else if (newPos < encoder_position)
                 display_mode_backward();
 
-            pos = newPos;
+            encoder_position = newPos;
 
             switch (display_mode) {
             case hours_mins:
@@ -585,8 +532,8 @@ void loop() {
     }
 
     case display_intensity: {
-        if (newPos != pos) {
-            brightness += 5 * (newPos - pos);
+        if (newPos != encoder_position) {
+            brightness += 5 * (newPos - encoder_position);
             if (brightness > 127)
                 brightness = 127;
             else if (brightness < 0)
@@ -594,24 +541,24 @@ void loop() {
 
             display(false);
 
-            pos = newPos;
+            encoder_position = newPos;
         }
         break;
     }
 
     case color: {
-        if (newPos != pos) {
-            change_color((newPos - pos) * 10);
+        if (newPos != encoder_position) {
+            change_color((newPos - encoder_position) * 10);
             show_color();
 
-            pos = newPos;
+            encoder_position = newPos;
         }
         break;
     }
 
     case led_intensity: {
-        if (newPos != pos) {
-            led_brightness += 5 * (newPos - pos);
+        if (newPos != encoder_position) {
+            led_brightness += 5 * (newPos - encoder_position);
             if (led_brightness > 127)
                 led_brightness = 127;
             else if (led_brightness < 0)
@@ -619,7 +566,7 @@ void loop() {
 
             show_color();
 
-            pos = newPos;
+            encoder_position = newPos;
         }
         break;
     }
