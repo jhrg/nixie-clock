@@ -20,6 +20,8 @@
 
 #include "exixe.h"
 
+#include "rotary_encoder.h"
+
 #define GPIO04 4
 #define GPIO05 5
 
@@ -86,7 +88,7 @@ bool bmp_ok = false; // true after sucessful init
 // RotaryEncoder encoder(PIN_IN1, PIN_IN2, RotaryEncoder::LatchMode::FOUR3);
 
 // Setup a RotaryEncoder with 2 steps per latch for the 2 signal input pins:
-RotaryEncoder encoder(ROTARY_CLK, ROTARY_DAT, RotaryEncoder::LatchMode::TWO03);
+// RotaryEncoder encoder(ROTARY_CLK, ROTARY_DAT, RotaryEncoder::LatchMode::TWO03);
 
 // Current encoder position
 long pos = 0;
@@ -96,10 +98,20 @@ volatile unsigned long control_mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
 
 volatile ControlMode control_mode = info;
+volatile ControlMode prev_control_mode = info;
 
+/**
+ * Process the rising edge of the mode switch. 
+ * 
+ * Do not update the mode display here since this might interrupt
+ * the write to a digit and doing so would 'steal' the CS, leading
+ * to a blank digit (beacuse the write operation would resume w/o
+ * having the CS pin for that digit set correctly).
+ */
 ICACHE_RAM_ATTR void mode_switch() {
     cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        prev_control_mode = control_mode; // Used to update the 'mode display'
         switch (control_mode) {
         case info:
             control_mode = display_intensity;
@@ -126,7 +138,7 @@ volatile unsigned long rotary_change_time = 0;
 
 ICACHE_RAM_ATTR void rotary_encoder() {
     cli();
-
+#if 0
     // only record one tick per iteration of the main loop
 #if 1
     if (millis() > (rotary_change_time + ROTARY_INTERVAL) && encoder.getPosition() == pos) {
@@ -137,7 +149,7 @@ ICACHE_RAM_ATTR void rotary_encoder() {
     if (encoder.getPosition() == pos)
         encoder.tick();
 #endif
-
+#endif
     sei();
 }
 
@@ -205,6 +217,7 @@ void digit_crossfade(unsigned int count) {
 
     bool done;
     do {
+        rotary_encoder_poll();
         done = true;
         switch (count) {
         case 4:
@@ -441,8 +454,10 @@ void setup() {
     // Rotary encoder - INPUT_PULLUP set by the rotary encode ctor
     //pinMode(ROTARY_CLK, INPUT_PULLUP);
     //pinMode(ROTARY_DAT, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotary_encoder, CHANGE);
-    attachInterrupt(digitalPinToInterrupt(ROTARY_DAT), rotary_encoder, CHANGE);
+    //attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotary_encoder, CHANGE);
+    //attachInterrupt(digitalPinToInterrupt(ROTARY_DAT), rotary_encoder, CHANGE);
+
+    rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
@@ -505,8 +520,37 @@ void loop() {
 
     DateTime now(RTC.now());
 
-    // Test the rotary encoder and update brightness
+// Test the rotary encoder and update brightness
+#if 0
     long newPos = encoder.getPosition();
+#else
+    int newPos = rotary_encoder_poll();
+#endif
+
+    // Mode display
+    if (prev_control_mode != control_mode) {
+        switch (control_mode) {
+        case info:
+            digit_1.set_dots(0, 0);
+            break;
+
+        case display_intensity:
+            digit_1.set_dots(0, brightness);
+            break;
+
+        case color:
+            digit_1.set_dots(brightness, 0);
+            break;
+
+        case led_intensity:
+            digit_1.set_dots(brightness, brightness);
+            break;
+
+        default:
+            digit_1.set_dots(0, 0);
+            break;
+        }
+    }
 
     switch (control_mode) {
     case info: {
