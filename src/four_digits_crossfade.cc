@@ -93,7 +93,7 @@ bool bmp_ok = false; // true after sucessful init
 // Current encoder position
 long pos = 0;
 
-volatile bool control_mode_change = false;
+// volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
 
@@ -133,6 +133,7 @@ ICACHE_RAM_ATTR void mode_switch() {
     sei();
 }
 
+#if 0
 volatile unsigned long rotary_change_time = 0;
 #define ROTARY_INTERVAL 3 // ms
 
@@ -152,6 +153,7 @@ ICACHE_RAM_ATTR void rotary_encoder() {
 #endif
     sei();
 }
+#endif
 
 /**
  * Copy the values[] array to the old_values[] array
@@ -191,8 +193,8 @@ unsigned int values_changed() {
  * 
  * Only call this function if at least one tube's value should change.
  * 
- * @param tubes An array of exixe pointers - digit_1 == [0], ...
- * @param values An array of digit values
+ * In the loop that actually does the fade, poll the rotary encoder.
+ * 
  * @param count the number of tubes/digits to change (1-4), starting
  * with the fourth tube and working backward.
  */
@@ -222,16 +224,12 @@ void digit_crossfade(unsigned int count) {
         switch (count) {
         case 4:
             done = (tubes[DIGIT_1]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
-            //delay(5);
         case 3:
             done = (tubes[DIGIT_2]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
-            //delay(5);
         case 2:
             done = (tubes[DIGIT_3]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
-            //delay(5);
         case 1:
             done = (tubes[DIGIT_4]->crossfade_run() == EXIXE_ANIMATION_FINISHED) && done;
-            //delay(5);
         }
     } while (!done);
 }
@@ -261,6 +259,7 @@ void display(bool fade = false) {
     set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
 }
 
+#if 0
 bool check_control_mode_switch() {
     if (control_mode_change) {
         switch (control_mode) {
@@ -285,6 +284,7 @@ bool check_control_mode_switch() {
 
     return false;
 }
+#endif
 
 void display_mode_forward() {
     switch (display_mode) {
@@ -451,12 +451,6 @@ void setup() {
     pinMode(MODE_SWITCH, INPUT);
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
 
-    // Rotary encoder - INPUT_PULLUP set by the rotary encode ctor
-    //pinMode(ROTARY_CLK, INPUT_PULLUP);
-    //pinMode(ROTARY_DAT, INPUT_PULLUP);
-    //attachInterrupt(digitalPinToInterrupt(ROTARY_CLK), rotary_encoder, CHANGE);
-    //attachInterrupt(digitalPinToInterrupt(ROTARY_DAT), rotary_encoder, CHANGE);
-
     rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
 
     pinMode(digit_1_cs, OUTPUT);
@@ -502,11 +496,6 @@ void setup() {
 
     // Initial display; show hours & mins
     DateTime now(RTC.now());
-    // record these values for use later to determine when dgits change
-    //old_left_pair = now.hour();
-    //old_right_pair = now.minute();
-    // display(old_left_pair, old_right_pair, true /* fade */);
-
     set_values(now.hour(), now.minute());
     save_values();
 
@@ -517,15 +506,6 @@ unsigned long temperature_update_time = 0;
 unsigned long pressure_update_time = 0;
 
 void loop() {
-
-    DateTime now(RTC.now());
-
-// Test the rotary encoder and update brightness
-#if 0
-    long newPos = encoder.getPosition();
-#else
-    int newPos = rotary_encoder_poll();
-#endif
 
     // Mode display
     if (prev_control_mode != control_mode) {
@@ -551,6 +531,12 @@ void loop() {
             break;
         }
     }
+
+    // Get the current time
+    DateTime now(RTC.now());
+
+    // Test the rotary encoder and update brightness
+    int newPos = rotary_encoder_poll();
 
     switch (control_mode) {
     case info: {
