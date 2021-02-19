@@ -107,6 +107,7 @@ long encoder_position = 0;
 // volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
+#define LONG_MODE_SWITCH_PRESS 4000
 
 volatile ControlMode control_mode = info;
 volatile ControlMode prev_control_mode = info;
@@ -151,18 +152,20 @@ ICACHE_RAM_ATTR void mode_switch() {
 volatile bool switch_mode_rising_edge = true;
 volatile int control_mode_switch_duration = 0;
 
-ICACHE_RAM_ATTR void timed_mode_switch() {
-    if (switch_mode_rising_edge &&
-        millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+ICACHE_RAM_ATTR void timed_mode_switch_down();
+
+ICACHE_RAM_ATTR void timed_mode_switch_up() {
+    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         // Triggered on th rising edge is the button press; start the timer
         control_mode_switch_time = millis();
-        switch_mode_rising_edge = false;
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch, FALLING);
-    }
-    else { 
+        control_mode_switch_duration = 0;
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_down, FALLING);
+    } 
+}
+
+ICACHE_RAM_ATTR void timed_mode_switch_down() {
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
-        switch_mode_rising_edge = true;
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch, RISING);
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_up, RISING);
         control_mode_switch_duration = millis() - control_mode_switch_time;
         control_mode_switch_time = millis();
         prev_control_mode = control_mode; // Used to update the 'mode display'
@@ -182,7 +185,6 @@ ICACHE_RAM_ATTR void timed_mode_switch() {
         default:
             break;
         }
-    }
     }
 }
 #endif
@@ -450,7 +452,7 @@ void setup() {
     pinMode(MODE_SWITCH, INPUT);
 #if TIMED_MODE_SWITCH
     switch_mode_rising_edge = true;
-    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, RISING);
+    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_up, RISING);
 #else
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
 #endif
@@ -530,8 +532,19 @@ void loop() {
     // Mode display
     if (prev_control_mode != control_mode) {
         // When we're here changing modes, save the state. Only copies
-        // to EEPROM when the 'saved_state' changes.
+        // to EEPROM when commit is called when we transition to the info
+        // state.
         EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
+
+        if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
+            digit_3.set_dots(saved_state.brightness, saved_state.brightness);
+        }
+        else {
+            digit_3.set_dots(0, 0);
+        }
+
+        prev_control_mode = control_mode;
+
         switch (control_mode) {
         case info:
             digit_1.set_dots(0, 0);
