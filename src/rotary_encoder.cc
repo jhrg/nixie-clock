@@ -5,6 +5,13 @@
 
 #include <Arduino.h>
 
+#if 0
+//BUILD_NANO
+typedef unsigned short uint16_t;
+typedef char int8_t;
+typedef unsigned char uint8_t;
+#endif
+
 static long counter = 0;
 static uint16_t clock_pin;
 static uint16_t data_pin;

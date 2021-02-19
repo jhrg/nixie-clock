@@ -14,8 +14,11 @@
 
 #include <Arduino.h>
 
+#if BUILD_ESP8266_NODEMCU
+#include <EEPROM.h>
+#endif
+
 #include <RTClibExtended.h>
-#include <RotaryEncoder.h>
 #include <Wire.h>
 
 #include <Adafruit_BMP085.h>
@@ -57,11 +60,23 @@ exixe *tubes[NUM_TUBES];
 unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
-// brightness, led_brightness and color_index are adjusted by the
-// rotary encoder and can be negative
-int brightness = 127;        // tube brightness, 0 - 127
 unsigned int fade_time = 15; // 30 frames = 1 second
-int led_brightness = 64;     // 0 - 127
+
+// brightness, led_brightness and color_values are adjusted by the
+// rotary encoder and can be negative. These values are saved in
+// EEPROM so they carry over even when the clock is off.
+
+#define SAVED_STATE_ADDRESS 0
+#define MAX_COLOR_VALUE 127
+
+struct SavedState {
+    int brightness = 127;    // tube brightness, 0 - 127
+    int led_brightness = 64; // 0 - 127
+
+    int red_value = MAX_COLOR_VALUE;
+    int green_value = 0;
+    int blue_value = 0;
+} saved_state;
 
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
@@ -103,10 +118,13 @@ volatile ControlMode prev_control_mode = info;
  * the write to a digit and doing so would 'steal' the CS, leading
  * to a blank digit (beacuse the write operation would resume w/o
  * having the CS pin for that digit set correctly).
+ * 
+ * @note Interrupts are disabled in ISR functions and millis() does
+ * not advance.
  */
 ICACHE_RAM_ATTR void mode_switch() {
-    cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        control_mode_switch_time = millis();
         prev_control_mode = control_mode; // Used to update the 'mode display'
         switch (control_mode) {
         case info:
@@ -124,10 +142,50 @@ ICACHE_RAM_ATTR void mode_switch() {
         default:
             break;
         }
-        control_mode_switch_time = millis();
     }
-    sei();
 }
+
+#if TIMED_MODE_SWITCH
+// Is the timed_mode_switch ISR triggered on the rising or falling
+// edge of the interrupt?
+volatile bool switch_mode_rising_edge = true;
+volatile int control_mode_switch_duration = 0;
+
+ICACHE_RAM_ATTR void timed_mode_switch() {
+    if (switch_mode_rising_edge &&
+        millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        // Triggered on th rising edge is the button press; start the timer
+        control_mode_switch_time = millis();
+        switch_mode_rising_edge = false;
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch, FALLING);
+    }
+    else { 
+    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        switch_mode_rising_edge = true;
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch, RISING);
+        control_mode_switch_duration = millis() - control_mode_switch_time;
+        control_mode_switch_time = millis();
+        prev_control_mode = control_mode; // Used to update the 'mode display'
+        switch (control_mode) {
+        case info:
+            control_mode = display_intensity;
+            break;
+        case display_intensity:
+            control_mode = color;
+            break;
+        case color:
+            control_mode = led_intensity;
+            break;
+        case led_intensity:
+            control_mode = info;
+            break;
+        default:
+            break;
+        }
+    }
+    }
+}
+#endif
 
 /**
  * Copy the values[] array to the old_values[] array
@@ -176,18 +234,18 @@ void digit_crossfade(unsigned int count) {
 
     switch (count) {
     case 4:
-        tubes[DIGIT_1]->crossfade_init(values[DIGIT_1], fade_time * 2, brightness, 0);
+        tubes[DIGIT_1]->crossfade_init(values[DIGIT_1], fade_time * 2, saved_state.brightness, 0);
     case 3:
-        tubes[DIGIT_2]->crossfade_init(values[DIGIT_2], fade_time * 2, brightness, 0);
+        tubes[DIGIT_2]->crossfade_init(values[DIGIT_2], fade_time * 2, saved_state.brightness, 0);
     case 2:
-        tubes[DIGIT_3]->crossfade_init(values[DIGIT_3], fade_time, brightness, 0);
+        tubes[DIGIT_3]->crossfade_init(values[DIGIT_3], fade_time, saved_state.brightness, 0);
     case 1:
-        tubes[DIGIT_4]->crossfade_init(values[DIGIT_4], fade_time, brightness, 0);
+        tubes[DIGIT_4]->crossfade_init(values[DIGIT_4], fade_time, saved_state.brightness, 0);
         break;
     }
 
     if (display_mode == temperature || display_mode == pressure)
-        digit_2.set_dots(0, brightness);
+        digit_2.set_dots(0, saved_state.brightness);
     else
         digit_2.set_dots(0, 0);
 
@@ -210,13 +268,13 @@ void digit_crossfade(unsigned int count) {
 
 void set_digit(int count, exixe *tube, bool fade) {
     if (fade) {
-        unsigned int delta = ceil(INITIAL_FADE_TIME / brightness);
-        for (int b = 0; b < brightness + 1; b++) {
+        unsigned int delta = ceil(INITIAL_FADE_TIME / saved_state.brightness);
+        for (int b = 0; b < saved_state.brightness + 1; b++) {
             tube->show_digit(count, b, 0);
             delay(delta);
         }
     } else {
-        tube->show_digit(count, brightness, 0);
+        tube->show_digit(count, saved_state.brightness, 0);
     }
 }
 
@@ -225,7 +283,7 @@ void display(bool fade = false) {
     set_digit(values[DIGIT_2], tubes[DIGIT_2], fade);
 
     if (display_mode == temperature || display_mode == pressure)
-        tubes[DIGIT_2]->set_dots(0, brightness);
+        tubes[DIGIT_2]->set_dots(0, saved_state.brightness);
     else
         tubes[DIGIT_2]->set_dots(0, 0);
 
@@ -271,12 +329,6 @@ void display_mode_backward() {
     }
 }
 
-#define MAX_COLOR_VALUE 127
-
-int red_value = MAX_COLOR_VALUE;
-int green_value = 0;
-int blue_value = 0;
-
 /**
  * Cycle through the colors of the rainbow. If steps is positive,
  * move from red toward blue to purple and back to red again. If
@@ -301,55 +353,55 @@ void change_color(int steps) {
 
     switch (color_state) {
     case red_to_yellow:
-        red_value = MAX_COLOR_VALUE;
-        green_value += steps;
-        if (green_value > MAX_COLOR_VALUE) {
-            green_value = MAX_COLOR_VALUE;
+        saved_state.red_value = MAX_COLOR_VALUE;
+        saved_state.green_value += steps;
+        if (saved_state.green_value > MAX_COLOR_VALUE) {
+            saved_state.green_value = MAX_COLOR_VALUE;
             color_state = yellow_to_green;
-        } else if (green_value < 0) {
-            green_value = 0;
+        } else if (saved_state.green_value < 0) {
+            saved_state.green_value = 0;
             color_state = blue_to_red;
         }
         break;
 
     case yellow_to_green:
-        green_value = MAX_COLOR_VALUE;
-        red_value -= steps;
-        if (red_value <= 0) {
-            red_value = 0;
+        saved_state.green_value = MAX_COLOR_VALUE;
+        saved_state.red_value -= steps;
+        if (saved_state.red_value <= 0) {
+            saved_state.red_value = 0;
             color_state = green_to_blue;
-        } else if (red_value > MAX_COLOR_VALUE) {
-            red_value = MAX_COLOR_VALUE;
+        } else if (saved_state.red_value > MAX_COLOR_VALUE) {
+            saved_state.red_value = MAX_COLOR_VALUE;
             color_state = red_to_yellow;
         }
         break;
 
     case green_to_blue:
-        red_value = 0;
-        green_value -= steps;
-        if (green_value < 0)
-            green_value = 0;
-        blue_value += steps;
-        if (blue_value > MAX_COLOR_VALUE) {
-            blue_value = MAX_COLOR_VALUE;
+        saved_state.red_value = 0;
+        saved_state.green_value -= steps;
+        if (saved_state.green_value < 0)
+            saved_state.green_value = 0;
+        saved_state.blue_value += steps;
+        if (saved_state.blue_value > MAX_COLOR_VALUE) {
+            saved_state.blue_value = MAX_COLOR_VALUE;
             color_state = blue_to_red;
-        } else if (blue_value < 0) {
-            blue_value = 0;
+        } else if (saved_state.blue_value < 0) {
+            saved_state.blue_value = 0;
             color_state = yellow_to_green;
         }
         break;
 
     case blue_to_red:
-        green_value = 0;
-        blue_value -= steps;
-        if (blue_value < 0)
-            blue_value = 0;
-        red_value += steps;
-        if (red_value > MAX_COLOR_VALUE) {
-            red_value = MAX_COLOR_VALUE;
+        saved_state.green_value = 0;
+        saved_state.blue_value -= steps;
+        if (saved_state.blue_value < 0)
+            saved_state.blue_value = 0;
+        saved_state.red_value += steps;
+        if (saved_state.red_value > MAX_COLOR_VALUE) {
+            saved_state.red_value = MAX_COLOR_VALUE;
             color_state = red_to_yellow;
-        } else if (red_value < 0) {
-            red_value = 0;
+        } else if (saved_state.red_value < 0) {
+            saved_state.red_value = 0;
             color_state = green_to_blue;
         }
         break;
@@ -357,10 +409,10 @@ void change_color(int steps) {
 }
 
 void show_color() {
-    float scale_factor = (led_brightness / 127.0);
-    unsigned int r = red_value * scale_factor;
-    unsigned int g = green_value * scale_factor;
-    unsigned int b = blue_value * scale_factor;
+    float scale_factor = (saved_state.led_brightness / 127.0);
+    unsigned int r = saved_state.red_value * scale_factor;
+    unsigned int g = saved_state.green_value * scale_factor;
+    unsigned int b = saved_state.blue_value * scale_factor;
 
     digit_1.set_led(r, g, b);
     digit_2.set_led(r, g, b);
@@ -396,7 +448,12 @@ void setup() {
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
     pinMode(MODE_SWITCH, INPUT);
+#if TIMED_MODE_SWITCH
+    switch_mode_rising_edge = true;
+    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, RISING);
+#else
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
+#endif
 
     rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
 
@@ -439,6 +496,22 @@ void setup() {
     tubes[DIGIT_3] = &digit_3;
     tubes[DIGIT_4] = &digit_4;
 
+    // Get the state vector from the EEPROM and use it.
+    // If the brightness and led_brightness are zero, use the
+    // default values.
+    EEPROM.begin(sizeof(SavedState));
+
+    // Set or clear this in the platformio.ini file. This ensures
+    // that the EEPROM (flash for the ESP8266) has values that don't
+    // freak out the MCU on boot because the memory has random
+    // values by default.
+#if RESET_PARAMS
+    EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
+    EEPROM.commit();
+#else
+    EEPROM.get(SAVED_STATE_ADDRESS, saved_state);
+#endif
+
     show_color();
 
     // Initial display; show hours & mins
@@ -456,21 +529,25 @@ void loop() {
 
     // Mode display
     if (prev_control_mode != control_mode) {
+        // When we're here changing modes, save the state. Only copies
+        // to EEPROM when the 'saved_state' changes.
+        EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
         switch (control_mode) {
         case info:
             digit_1.set_dots(0, 0);
+            EEPROM.commit(); // This actually saves the data.
             break;
 
         case display_intensity:
-            digit_1.set_dots(0, brightness);
+            digit_1.set_dots(0, saved_state.brightness);
             break;
 
         case color:
-            digit_1.set_dots(brightness, 0);
+            digit_1.set_dots(saved_state.brightness, 0);
             break;
 
         case led_intensity:
-            digit_1.set_dots(brightness, brightness);
+            digit_1.set_dots(saved_state.brightness, saved_state.brightness);
             break;
 
         default:
@@ -533,11 +610,11 @@ void loop() {
 
     case display_intensity: {
         if (newPos != encoder_position) {
-            brightness += 5 * (newPos - encoder_position);
-            if (brightness > 127)
-                brightness = 127;
-            else if (brightness < 0)
-                brightness = 0;
+            saved_state.brightness += 5 * (newPos - encoder_position);
+            if (saved_state.brightness > 127)
+                saved_state.brightness = 127;
+            else if (saved_state.brightness < 0)
+                saved_state.brightness = 0;
 
             display(false);
 
@@ -558,11 +635,11 @@ void loop() {
 
     case led_intensity: {
         if (newPos != encoder_position) {
-            led_brightness += 5 * (newPos - encoder_position);
-            if (led_brightness > 127)
-                led_brightness = 127;
-            else if (led_brightness < 0)
-                led_brightness = 0;
+            saved_state.led_brightness += 5 * (newPos - encoder_position);
+            if (saved_state.led_brightness > 127)
+                saved_state.led_brightness = 127;
+            else if (saved_state.led_brightness < 0)
+                saved_state.led_brightness = 0;
 
             show_color();
 
