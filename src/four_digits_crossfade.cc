@@ -18,10 +18,9 @@
 #include <EEPROM.h>
 #endif
 
+#include <Adafruit_BMP085.h>
 #include <RTClibExtended.h>
 #include <Wire.h>
-
-#include <Adafruit_BMP085.h>
 
 #include "exixe.h"
 
@@ -68,10 +67,11 @@ unsigned int fade_time = 15; // 30 frames = 1 second
 
 #define SAVED_STATE_ADDRESS 0
 #define MAX_COLOR_VALUE 127
+#define MAX_BRIGHTNESS 127
 
 struct SavedState {
-    int brightness = 127;    // tube brightness, 0 - 127
-    int led_brightness = 64; // 0 - 127
+    int brightness = MAX_BRIGHTNESS;         // tube brightness, 0 - 127
+    int led_brightness = MAX_BRIGHTNESS / 2; // 0 - 127
 
     int red_value = MAX_COLOR_VALUE;
     int green_value = 0;
@@ -85,21 +85,22 @@ enum DisplayMode {
     hours_mins = 0,
     mins_secs = 1,
     temperature = 2,
-    pressure = 3
+    pressure = 3,
+    set_time = 4
 };
 
 enum ControlMode {
     info = 0,
     display_intensity = 1,
     color = 2,
-    led_intensity = 3
+    led_intensity = 3,
+    set_hours = 4,
+    set_minutes = 5
 };
 
 volatile DisplayMode display_mode = hours_mins;
 
 Adafruit_BMP085 bmp;
-
-bool bmp_ok = false; // true after sucessful init
 
 // Current encoder position
 long encoder_position = 0;
@@ -107,90 +108,101 @@ long encoder_position = 0;
 // volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
 #define MODE_SWITCH_INTERVAL 100 // ms
-#define LONG_MODE_SWITCH_PRESS 4000
+#define LONG_MODE_SWITCH_PRESS 2000
 
 volatile ControlMode control_mode = info;
 volatile ControlMode prev_control_mode = info;
 
+// Is the timed_mode_switch ISR triggered on the rising or falling
+// edge of the interrupt?
+volatile int control_mode_switch_duration = 0;
+
+// Forward declaration
+ICACHE_RAM_ATTR void timed_mode_switch_release();
+
 /**
- * Process the falling edge of the mode switch. 
- * 
- * Do not update the mode display here since this might interrupt
- * the write to a digit and doing so would 'steal' the CS, leading
- * to a blank digit (beacuse the write operation would resume w/o
- * having the CS pin for that digit set correctly).
+ * The ISR for the mode switch. Triggerred when the switch is pressed.
+ * The mode switch GPIO held LOW normally and a button press causes
+ * the input to go high. The ISR is triggerred on the rising edge of
+ * the interrupt. Capture the time and set the duration to zero. Then
+ * register a second ISR for the button release, which will be triggerred
+ * when the GPIO pin state drops back to the LOW level.
  * 
  * @note Interrupts are disabled in ISR functions and millis() does
  * not advance.
  */
-ICACHE_RAM_ATTR void mode_switch() {
-    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
-        control_mode_switch_time = millis();
-        prev_control_mode = control_mode; // Used to update the 'mode display'
-        switch (control_mode) {
-        case info:
-            control_mode = display_intensity;
-            break;
-        case display_intensity:
-            control_mode = color;
-            break;
-        case color:
-            control_mode = led_intensity;
-            break;
-        case led_intensity:
-            control_mode = info;
-            break;
-        default:
-            break;
-        }
-    }
-}
-
-#if TIMED_MODE_SWITCH
-// Is the timed_mode_switch ISR triggered on the rising or falling
-// edge of the interrupt?
-volatile bool switch_mode_rising_edge = true;
-volatile int control_mode_switch_duration = 0;
-
-ICACHE_RAM_ATTR void timed_mode_switch_down();
-
-ICACHE_RAM_ATTR void timed_mode_switch_up() {
+ICACHE_RAM_ATTR void timed_mode_switch_push() {
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         // Triggered on th rising edge is the button press; start the timer
         control_mode_switch_time = millis();
         control_mode_switch_duration = 0;
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_down, FALLING);
-    } 
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_release, FALLING);
+    }
 }
 
-ICACHE_RAM_ATTR void timed_mode_switch_down() {
+/**
+ * When the mode switch is released, this ISR is run.
+ */
+ICACHE_RAM_ATTR void timed_mode_switch_release() {
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_up, RISING);
+        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
         control_mode_switch_duration = millis() - control_mode_switch_time;
         control_mode_switch_time = millis();
         prev_control_mode = control_mode; // Used to update the 'mode display'
-        switch (control_mode) {
-        case info:
-            control_mode = display_intensity;
-            break;
-        case display_intensity:
-            control_mode = color;
-            break;
-        case color:
-            control_mode = led_intensity;
-            break;
-        case led_intensity:
-            control_mode = info;
-            break;
-        default:
-            break;
+
+        if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
+            switch (control_mode) {
+            case info:
+            case display_intensity:
+            case color:
+            case led_intensity:
+                control_mode = set_hours;
+                break;
+
+            case set_hours:
+                control_mode = info;
+                break;
+
+            case set_minutes:
+                control_mode = info;
+                break;
+            }
+        } else {
+            switch (control_mode) {
+            case info:
+                control_mode = display_intensity;
+                break;
+            case display_intensity:
+                control_mode = color;
+                break;
+            case color:
+                control_mode = led_intensity;
+                break;
+            case led_intensity:
+                // led_intensity is the end of the cycle of the four main modes
+                control_mode = info;
+                break;
+
+            // If in set-time mode, a short press goes from hours to minutes
+            case set_hours:
+                control_mode = set_minutes;
+                break;
+
+            case set_minutes:
+                control_mode = info;
+                break;
+
+            default:
+                break;
+            }
         }
     }
 }
-#endif
 
 /**
- * Copy the values[] array to the old_values[] array
+ * Copy the values[] array to the old_values[] array. Comparing a new time
+ * with the data in old_values[] is how the digits are updated when the 
+ * time changes and not otherwise.
  */
 void save_values() {
     for (int i = 0; i < NUM_TUBES; ++i) {
@@ -450,12 +462,7 @@ void setup() {
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
     pinMode(MODE_SWITCH, INPUT);
-#if TIMED_MODE_SWITCH
-    switch_mode_rising_edge = true;
-    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_up, RISING);
-#else
-    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), mode_switch, FALLING);
-#endif
+    attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
 
     rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
 
@@ -470,9 +477,15 @@ void setup() {
     int scl = GPIO05;
     Wire.begin(sda, scl);
 
+    while (!bmp.begin()) {
+        delay(100);
+    }
+
+#if 0
     if (bmp.begin()) {
         bmp_ok = true;
     }
+#endif
 
     RTC.begin(); // always returns true
 
@@ -535,36 +548,55 @@ void loop() {
         // to EEPROM when commit is called when we transition to the info
         // state.
         EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-
+#if 0
         if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
-            digit_3.set_dots(saved_state.brightness, saved_state.brightness);
+            digit_4.set_dots(MAX_BRIGHTNESS, MAX_BRIGHTNESS);
+        } else {
+            digit_4.set_dots(0, 0);
         }
-        else {
-            digit_3.set_dots(0, 0);
-        }
-
+#endif
         prev_control_mode = control_mode;
 
         switch (control_mode) {
         case info:
             digit_1.set_dots(0, 0);
+            digit_2.set_dots(0, 0);
+            digit_3.set_dots(0, 0);
+            digit_4.set_dots(0, 0);
             EEPROM.commit(); // This actually saves the data.
             break;
 
         case display_intensity:
-            digit_1.set_dots(0, saved_state.brightness);
+            digit_1.set_dots(0, MAX_BRIGHTNESS);
             break;
 
         case color:
-            digit_1.set_dots(saved_state.brightness, 0);
+            digit_1.set_dots(MAX_BRIGHTNESS, 0);
             break;
 
         case led_intensity:
-            digit_1.set_dots(saved_state.brightness, saved_state.brightness);
+            digit_1.set_dots(MAX_BRIGHTNESS, MAX_BRIGHTNESS);
+            break;
+
+        case set_hours:
+            digit_1.set_dots(MAX_BRIGHTNESS, 0);
+            digit_2.set_dots(0, MAX_BRIGHTNESS);
+            digit_3.set_dots(0, 0);
+            digit_4.set_dots(0, 0);
+            break;
+
+        case set_minutes:
+            digit_1.set_dots(0, 0);
+            digit_2.set_dots(0, 0);
+            digit_3.set_dots(MAX_BRIGHTNESS, 0);
+            digit_4.set_dots(0, MAX_BRIGHTNESS);
             break;
 
         default:
             digit_1.set_dots(0, 0);
+            digit_2.set_dots(0, 0);
+            digit_3.set_dots(0, 0);
+            digit_4.set_dots(0, 0);
             break;
         }
     }
@@ -660,6 +692,13 @@ void loop() {
         }
         break;
     }
+
+    // TODO add this
+    case set_hours:
+        break;
+
+    case set_minutes:
+        break;
 
     default:
         break;
