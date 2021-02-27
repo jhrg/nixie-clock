@@ -56,7 +56,9 @@ exixe digit_4 = exixe(digit_4_cs);
 #define DIGIT_4 3
 
 exixe *tubes[NUM_TUBES];
-// Add arrays for the left dot and right dot.
+
+unsigned int left_dot[NUM_TUBES];
+unsigned int right_dot[NUM_TUBES];
 unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
@@ -259,10 +261,16 @@ void digit_crossfade(unsigned int count) {
         break;
     }
 
+#if 0
     if (display_mode == temperature || display_mode == pressure)
         digit_2.set_dots(0, saved_state.brightness);
     else
         digit_2.set_dots(0, 0);
+#endif
+
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        tubes[i]->set_dots(left_dot[i], right_dot[i]);
+    }
 
     bool done;
     do {
@@ -294,16 +302,27 @@ void set_digit(int count, exixe *tube, bool fade) {
 }
 
 void display(bool fade = false) {
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        set_digit(values[i], tubes[i], fade);
+        tubes[i]->set_dots(left_dot[i], right_dot[i]);
+    }
+
+#if 0
     set_digit(values[DIGIT_1], tubes[DIGIT_1], fade);
     set_digit(values[DIGIT_2], tubes[DIGIT_2], fade);
 
+#if 0
     if (display_mode == temperature || display_mode == pressure)
         tubes[DIGIT_2]->set_dots(0, saved_state.brightness);
     else
         tubes[DIGIT_2]->set_dots(0, 0);
+#endif
+
+    tubes[DIGIT_2]->set_dots(left_dot[DIGIT_2], right_dot[DIGIT_2]);
 
     set_digit(values[DIGIT_3], tubes[DIGIT_3], fade);
     set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
+#endif
 }
 
 void display_mode_forward() {
@@ -459,6 +478,23 @@ float get_pressure() {
     return bmp.readPressure() * 0.0002953;
 }
 
+void zero_dots() {
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        left_dot[i] = 0;
+        right_dot[i] = 0;
+    }
+}
+
+void decimal_point(bool on = true) {
+    if (on) {
+        left_dot[DIGIT_2] = 0;
+        right_dot[DIGIT_2] = saved_state.brightness;
+    } else {
+        left_dot[DIGIT_2] = 0;
+        right_dot[DIGIT_2] = 0;
+    }
+}
+
 bool bmp_ok = false;
 
 void setup() {
@@ -484,16 +520,10 @@ void setup() {
     Wire.begin(sda, scl);
 
     int bmp_tries = 0;
-    while (bmp_tries < 100 && !(bmp_ok = bmp.begin())) {
+    while (bmp_tries < 10 && !(bmp_ok = bmp.begin())) {
         delay(100);
         bmp_tries++;
     }
-
-#if 0
-    if (bmp.begin()) {
-        bmp_ok = true;
-    }
-#endif
 
     RTC.begin(); // always returns true
 
@@ -542,6 +572,8 @@ void setup() {
     set_values(now.hour(), now.minute());
     save_values();
 
+    zero_dots();
+
     display(true);
 }
 
@@ -561,46 +593,77 @@ void loop() {
 
         switch (control_mode) {
         case info:
-            digit_1.set_dots(0, 0);
-            digit_2.set_dots(0, 0);
-            digit_3.set_dots(0, 0);
-            digit_4.set_dots(0, 0);
+            zero_dots();
             // TODO Check if there's really a difference to save.
-            // TODO If entering info from set_minutes, zero the seconds
             EEPROM.commit(); // This actually saves the data.
             break;
 
         case display_intensity:
+            left_dot[0] = 0;
+            right_dot[0] = MAX_BRIGHTNESS;
+#if 0
             digit_1.set_dots(0, MAX_BRIGHTNESS);
+#endif
             break;
 
         case color:
+            left_dot[0] = MAX_BRIGHTNESS;
+            right_dot[0] = 0;
+#if 0
             digit_1.set_dots(MAX_BRIGHTNESS, 0);
+#endif
             break;
 
         case led_intensity:
+            left_dot[0] = MAX_BRIGHTNESS;
+            right_dot[0] = MAX_BRIGHTNESS;
+#if 0
             digit_1.set_dots(MAX_BRIGHTNESS, MAX_BRIGHTNESS);
+#endif
             break;
 
         case set_hours:
+            left_dot[0] = MAX_BRIGHTNESS;
+            right_dot[0] = 0;
+            left_dot[1] = 0;
+            right_dot[1] = MAX_BRIGHTNESS;
+            left_dot[2] = 0;
+            right_dot[2] = 0;
+            left_dot[3] = 0;
+            right_dot[3] = 0;
+#if 0
             digit_1.set_dots(MAX_BRIGHTNESS, 0);
             digit_2.set_dots(0, MAX_BRIGHTNESS);
             digit_3.set_dots(0, 0);
             digit_4.set_dots(0, 0);
+#endif
             break;
 
         case set_minutes:
+            left_dot[0] = 0;
+            right_dot[0] = 0;
+            left_dot[1] = 0;
+            right_dot[1] = 0;
+            left_dot[2] = MAX_BRIGHTNESS;
+            right_dot[2] = 0;
+            left_dot[3] = 0;
+            right_dot[3] = MAX_BRIGHTNESS;
+#if 0
             digit_1.set_dots(0, 0);
             digit_2.set_dots(0, 0);
             digit_3.set_dots(MAX_BRIGHTNESS, 0);
             digit_4.set_dots(0, MAX_BRIGHTNESS);
+#endif
             break;
 
         default:
+            zero_dots();
+#if 0
             digit_1.set_dots(0, 0);
             digit_2.set_dots(0, 0);
             digit_3.set_dots(0, 0);
             digit_4.set_dots(0, 0);
+#endif
             break;
         }
     }
@@ -624,10 +687,12 @@ void loop() {
             switch (display_mode) {
             case hours_mins:
                 set_values(now.hour(), now.minute());
+                decimal_point(false);
                 break;
 
             case mins_secs:
                 set_values(now.minute(), now.second());
+                decimal_point(false);
                 break;
 
             case temperature: {
@@ -635,6 +700,7 @@ void loop() {
                 float temperature = get_temp();
                 unsigned int int_temp = trunc(temperature);
                 set_values(int_temp, trunc((temperature - int_temp) * 100));
+                decimal_point();
                 break;
             }
 
@@ -643,11 +709,13 @@ void loop() {
                 float pressure = get_sea_level_pressure(); // get_pressure();
                 unsigned int int_press = trunc(pressure);
                 set_values(int_press, trunc((pressure - int_press) * 100));
+                decimal_point();
                 break;
             }
 
             default:
                 set_values(now.hour(), now.minute());
+                zero_dots();
                 break;
             }
 
@@ -701,14 +769,14 @@ void loop() {
     case set_hours:
         if (newPos != encoder_position) {
             long offset = newPos - encoder_position;
- 
-            // set the clock. 
-            TimeSpan ts(0, offset, 0, 0);   // Get a time span for offset hours
-            now = now + ts;                 // Add the hour_value timespan to the current time
-            RTC.adjust(now);                // Update the clock
+
+            // set the clock.
+            TimeSpan ts(0, offset, 0, 0); // Get a time span for offset hours
+            now = now + ts;               // Add the hour_value timespan to the current time
+            RTC.adjust(now);              // Update the clock
 
             // Update the display
-            set_values(now.hour(), now.minute());   
+            set_values(now.hour(), now.minute());
             display(true);
             save_values();
             encoder_position = newPos;
@@ -716,18 +784,18 @@ void loop() {
         break;
 
     case set_minutes:
-       if (newPos != encoder_position) {
+        if (newPos != encoder_position) {
             long offset = newPos - encoder_position;
- 
-            // set the clock. 
-            TimeSpan ts(0, 0, offset, 0);   // Get a time span for offset minutes
-            now = now + ts;                 // Add the hour_value timespan to the current time
-            TimeSpan ts2(0, 0, 0, now.second()); 
-            now = now - ts2;                // zero the seconds
-            RTC.adjust(now);                // Update the clock
+
+            // set the clock.
+            TimeSpan ts(0, 0, offset, 0); // Get a time span for offset minutes
+            now = now + ts;               // Add the hour_value timespan to the current time
+            TimeSpan ts2(0, 0, 0, now.second());
+            now = now - ts2; // zero the seconds
+            RTC.adjust(now); // Update the clock
 
             // Update the display
-            set_values(now.hour(), now.minute());   
+            set_values(now.hour(), now.minute());
             display(true);
             save_values();
             encoder_position = newPos;
