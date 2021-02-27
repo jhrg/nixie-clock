@@ -56,10 +56,11 @@ exixe digit_4 = exixe(digit_4_cs);
 #define DIGIT_4 3
 
 exixe *tubes[NUM_TUBES];
+// Add arrays for the left dot and right dot.
 unsigned int values[NUM_TUBES];
 unsigned int old_values[NUM_TUBES];
 
-unsigned int fade_time = 15; // 30 frames = 1 second
+unsigned int fade_time = 7; // 30 frames = 1 second
 
 // brightness, led_brightness and color_values are adjusted by the
 // rotary encoder and can be negative. These values are saved in
@@ -245,16 +246,16 @@ unsigned int values_changed() {
  * with the fourth tube and working backward.
  */
 void digit_crossfade(unsigned int count) {
-
+    int fade = fade_time * count;
     switch (count) {
     case 4:
-        tubes[DIGIT_1]->crossfade_init(values[DIGIT_1], fade_time * 2, saved_state.brightness, 0);
+        tubes[DIGIT_1]->crossfade_init(values[DIGIT_1], fade, saved_state.brightness, 0);
     case 3:
-        tubes[DIGIT_2]->crossfade_init(values[DIGIT_2], fade_time * 2, saved_state.brightness, 0);
+        tubes[DIGIT_2]->crossfade_init(values[DIGIT_2], fade, saved_state.brightness, 0);
     case 2:
-        tubes[DIGIT_3]->crossfade_init(values[DIGIT_3], fade_time, saved_state.brightness, 0);
+        tubes[DIGIT_3]->crossfade_init(values[DIGIT_3], fade, saved_state.brightness, 0);
     case 1:
-        tubes[DIGIT_4]->crossfade_init(values[DIGIT_4], fade_time, saved_state.brightness, 0);
+        tubes[DIGIT_4]->crossfade_init(values[DIGIT_4], fade, saved_state.brightness, 0);
         break;
     }
 
@@ -458,7 +459,12 @@ float get_pressure() {
     return bmp.readPressure() * 0.0002953;
 }
 
+bool bmp_ok = false;
+
 void setup() {
+    // let the power settle
+    delay(1000); // 1s
+
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
     pinMode(MODE_SWITCH, INPUT);
@@ -477,8 +483,10 @@ void setup() {
     int scl = GPIO05;
     Wire.begin(sda, scl);
 
-    while (!bmp.begin()) {
+    int bmp_tries = 0;
+    while (bmp_tries < 100 && !(bmp_ok = bmp.begin())) {
         delay(100);
+        bmp_tries++;
     }
 
 #if 0
@@ -548,13 +556,7 @@ void loop() {
         // to EEPROM when commit is called when we transition to the info
         // state.
         EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-#if 0
-        if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
-            digit_4.set_dots(MAX_BRIGHTNESS, MAX_BRIGHTNESS);
-        } else {
-            digit_4.set_dots(0, 0);
-        }
-#endif
+
         prev_control_mode = control_mode;
 
         switch (control_mode) {
@@ -563,6 +565,8 @@ void loop() {
             digit_2.set_dots(0, 0);
             digit_3.set_dots(0, 0);
             digit_4.set_dots(0, 0);
+            // TODO Check if there's really a difference to save.
+            // TODO If entering info from set_minutes, zero the seconds
             EEPROM.commit(); // This actually saves the data.
             break;
 
@@ -605,7 +609,7 @@ void loop() {
     DateTime now(RTC.now());
 
     // Test the rotary encoder and update brightness
-    int newPos = rotary_encoder_poll();
+    long newPos = rotary_encoder_poll();
 
     switch (control_mode) {
     case info: {
@@ -695,9 +699,39 @@ void loop() {
 
     // TODO add this
     case set_hours:
+        if (newPos != encoder_position) {
+            long offset = newPos - encoder_position;
+ 
+            // set the clock. 
+            TimeSpan ts(0, offset, 0, 0);   // Get a time span for offset hours
+            now = now + ts;                 // Add the hour_value timespan to the current time
+            RTC.adjust(now);                // Update the clock
+
+            // Update the display
+            set_values(now.hour(), now.minute());   
+            display(true);
+            save_values();
+            encoder_position = newPos;
+        }
         break;
 
     case set_minutes:
+       if (newPos != encoder_position) {
+            long offset = newPos - encoder_position;
+ 
+            // set the clock. 
+            TimeSpan ts(0, 0, offset, 0);   // Get a time span for offset minutes
+            now = now + ts;                 // Add the hour_value timespan to the current time
+            TimeSpan ts2(0, 0, 0, now.second()); 
+            now = now - ts2;                // zero the seconds
+            RTC.adjust(now);                // Update the clock
+
+            // Update the display
+            set_values(now.hour(), now.minute());   
+            display(true);
+            save_values();
+            encoder_position = newPos;
+        }
         break;
 
     default:

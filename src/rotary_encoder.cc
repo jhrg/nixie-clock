@@ -78,8 +78,8 @@ int8_t read_rotary() {
  * Return the state of the rotary encoder. Each call to poll()
  * reads one detent of the encoder.
  */
-int rotary_encoder_poll() {
-    int v = 0;
+long rotary_encoder_poll() {
+    long v = 0;
     if ((v = read_rotary())) {
         counter += v;
     }
