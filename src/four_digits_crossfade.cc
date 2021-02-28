@@ -261,13 +261,6 @@ void digit_crossfade(unsigned int count) {
         break;
     }
 
-#if 0
-    if (display_mode == temperature || display_mode == pressure)
-        digit_2.set_dots(0, saved_state.brightness);
-    else
-        digit_2.set_dots(0, 0);
-#endif
-
     for (int i = 0; i < NUM_TUBES; ++i) {
         tubes[i]->set_dots(left_dot[i], right_dot[i]);
     }
@@ -306,23 +299,6 @@ void display(bool fade = false) {
         set_digit(values[i], tubes[i], fade);
         tubes[i]->set_dots(left_dot[i], right_dot[i]);
     }
-
-#if 0
-    set_digit(values[DIGIT_1], tubes[DIGIT_1], fade);
-    set_digit(values[DIGIT_2], tubes[DIGIT_2], fade);
-
-#if 0
-    if (display_mode == temperature || display_mode == pressure)
-        tubes[DIGIT_2]->set_dots(0, saved_state.brightness);
-    else
-        tubes[DIGIT_2]->set_dots(0, 0);
-#endif
-
-    tubes[DIGIT_2]->set_dots(left_dot[DIGIT_2], right_dot[DIGIT_2]);
-
-    set_digit(values[DIGIT_3], tubes[DIGIT_3], fade);
-    set_digit(values[DIGIT_4], tubes[DIGIT_4], fade);
-#endif
 }
 
 void display_mode_forward() {
@@ -495,6 +471,12 @@ void decimal_point(bool on = true) {
     }
 }
 
+void display_dots() {
+    for (int i = 0; i < NUM_TUBES; ++i) {
+        tubes[i]->set_dots(left_dot[i], right_dot[i]);
+    }
+}
+
 bool bmp_ok = false;
 
 void setup() {
@@ -582,7 +564,7 @@ unsigned long pressure_update_time = 0;
 
 void loop() {
 
-    // Mode display
+    // If the control/configuration mode has changed, update the display.
     if (prev_control_mode != control_mode) {
         // When we're here changing modes, save the state. Only copies
         // to EEPROM when commit is called when we transition to the info
@@ -599,81 +581,51 @@ void loop() {
             break;
 
         case display_intensity:
-            left_dot[0] = 0;
-            right_dot[0] = MAX_BRIGHTNESS;
-#if 0
-            digit_1.set_dots(0, MAX_BRIGHTNESS);
-#endif
+            left_dot[DIGIT_1] = 0;
+            right_dot[DIGIT_1] = MAX_BRIGHTNESS;
             break;
 
         case color:
-            left_dot[0] = MAX_BRIGHTNESS;
-            right_dot[0] = 0;
-#if 0
-            digit_1.set_dots(MAX_BRIGHTNESS, 0);
-#endif
+            left_dot[DIGIT_1] = MAX_BRIGHTNESS;
+            right_dot[DIGIT_1] = 0;
             break;
 
         case led_intensity:
-            left_dot[0] = MAX_BRIGHTNESS;
-            right_dot[0] = MAX_BRIGHTNESS;
-#if 0
-            digit_1.set_dots(MAX_BRIGHTNESS, MAX_BRIGHTNESS);
-#endif
+            left_dot[DIGIT_1] = MAX_BRIGHTNESS;
+            right_dot[DIGIT_1] = MAX_BRIGHTNESS;
             break;
 
         case set_hours:
-            left_dot[0] = MAX_BRIGHTNESS;
-            right_dot[0] = 0;
-            left_dot[1] = 0;
-            right_dot[1] = MAX_BRIGHTNESS;
-            left_dot[2] = 0;
-            right_dot[2] = 0;
-            left_dot[3] = 0;
-            right_dot[3] = 0;
-#if 0
-            digit_1.set_dots(MAX_BRIGHTNESS, 0);
-            digit_2.set_dots(0, MAX_BRIGHTNESS);
-            digit_3.set_dots(0, 0);
-            digit_4.set_dots(0, 0);
-#endif
+            zero_dots();
+            left_dot[DIGIT_1] = MAX_BRIGHTNESS;
+            right_dot[DIGIT_2] = MAX_BRIGHTNESS;
             break;
 
         case set_minutes:
-            left_dot[0] = 0;
-            right_dot[0] = 0;
-            left_dot[1] = 0;
-            right_dot[1] = 0;
-            left_dot[2] = MAX_BRIGHTNESS;
-            right_dot[2] = 0;
-            left_dot[3] = 0;
-            right_dot[3] = MAX_BRIGHTNESS;
-#if 0
-            digit_1.set_dots(0, 0);
-            digit_2.set_dots(0, 0);
-            digit_3.set_dots(MAX_BRIGHTNESS, 0);
-            digit_4.set_dots(0, MAX_BRIGHTNESS);
-#endif
+            zero_dots();
+            left_dot[DIGIT_3] = MAX_BRIGHTNESS;
+            right_dot[DIGIT_4] = MAX_BRIGHTNESS;
             break;
 
         default:
             zero_dots();
-#if 0
-            digit_1.set_dots(0, 0);
-            digit_2.set_dots(0, 0);
-            digit_3.set_dots(0, 0);
-            digit_4.set_dots(0, 0);
-#endif
             break;
         }
+
+        display_dots();
     }
 
     // Get the current time
     DateTime now(RTC.now());
 
-    // Test the rotary encoder and update brightness
+    // Test the rotary encoder
     long newPos = rotary_encoder_poll();
 
+    // Based on the control mode, look at the encoder position and 
+    // act accordingly. For the 'info' mode, display hour/min, min/sec,
+    // et cetera. For other modes, change the configuration. If the
+    // rotary encoder position changed, update the display if that 
+    // is needed.
     switch (control_mode) {
     case info: {
         if (newPos != encoder_position) {
@@ -806,6 +758,7 @@ void loop() {
         break;
     }
 
+    // Check the time, pressure or temp and update as needed.
     unsigned int digit = 0;
     switch (display_mode) {
     case hours_mins:
