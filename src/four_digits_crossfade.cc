@@ -810,6 +810,7 @@ void loop() {
         break;
     }
 
+    display(false);
     // noise on the SPI bus can hose the LEDs; refresh them.
     show_color();
 }
