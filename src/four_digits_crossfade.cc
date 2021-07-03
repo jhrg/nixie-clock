@@ -19,12 +19,16 @@
 //#endif
 
 #include <Adafruit_BMP085.h>
+#include <PinChangeInterrupt.h>
 #include <RTClibExtended.h>
+#include <Rotary.h>
 #include <Wire.h>
 
 #include "exixe.h"
 
+#if 0
 #include "rotary_encoder.h"
+#endif
 
 // Define GPIO pins
 
@@ -62,7 +66,7 @@
 
 #endif
 
-#define BAUD_RATE 115200 // not used
+#define BAUD_RATE 9600 // not used
 
 #define INITIAL_FADE_TIME 250             // ms, time to fade in a digit when modes change
 #define MEASUREMENT_UPDATE_INTERVAL 10000 // 10s
@@ -130,7 +134,12 @@ volatile DisplayMode display_mode = hours_mins;
 Adafruit_BMP085 bmp;
 
 // Current encoder position
-long encoder_position = 0;
+volatile long encoder_position = 0;
+// Last encoder position the code used. This is updated once any
+// change in the encoder is processes]d.
+long old_encoder_position = 0;
+
+Rotary rotary_encoder = Rotary(ROTARY_CLK, ROTARY_DAT);
 
 // volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
@@ -227,6 +236,27 @@ ICACHE_RAM_ATTR void timed_mode_switch_release() {
     }
 }
 #elif BUILD_PRO_MINI
+// Implement the rotary encoder ISR
+#if 0
+// NOT USED
+/** @brief ISR for the A0-A5 pins; triggered on any change
+ */
+ISR(PCINT1_vect) {
+}
+
+/**
+ * @brief Configure the PCI (pin change interrupt) for a pin
+ * This is called by setup() to configure the interrupts that 
+ * trigger the above ISR code.
+ */
+void pci_setup(int pin) {
+    *digitalPinToPCMSK(pin) |= bit(digitalPinToPCMSKbit(pin)); // enable interrupt for pin
+    PCIFR |= bit(digitalPinToPCICRbit(pin));                   // clear any outstanding interrupt
+    PCICR |= bit(digitalPinToPCICRbit(pin));                   // enable interrupt for the group
+}
+#endif
+
+// The next two functions are ISRs that implement the mode-switch.
 // Forward declaration
 void timed_mode_switch_release();
 
@@ -243,6 +273,7 @@ void timed_mode_switch_release();
  */
 void timed_mode_switch_push() {
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        Serial.println("timed_mode_switch_push");
         // Triggered on th rising edge is the button press; start the timer
         control_mode_switch_time = millis();
         control_mode_switch_duration = 0;
@@ -255,12 +286,14 @@ void timed_mode_switch_push() {
  */
 void timed_mode_switch_release() {
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
+        Serial.println("timed_mode_switch_release");
         attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
         control_mode_switch_duration = millis() - control_mode_switch_time;
         control_mode_switch_time = millis();
         prev_control_mode = control_mode; // Used to update the 'mode display'
 
         if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
+            Serial.println("long press");
             switch (control_mode) {
             case info:
             case display_intensity:
@@ -278,6 +311,7 @@ void timed_mode_switch_release() {
                 break;
             }
         } else {
+            Serial.println("short press");
             switch (control_mode) {
             case info:
                 control_mode = display_intensity;
@@ -306,6 +340,9 @@ void timed_mode_switch_release() {
                 break;
             }
         }
+
+        Serial.print("control_mode: ");
+        Serial.println(control_mode);
     }
 }
 #endif
@@ -375,7 +412,9 @@ void digit_crossfade(unsigned int count) {
 
     bool done;
     do {
+#if 0
         rotary_encoder_poll();
+#endif
         done = true;
         switch (count) {
         case 4:
@@ -585,6 +624,19 @@ void display_dots() {
     }
 }
 
+void rotary_encoder_event() {
+    unsigned char result = rotary_encoder.process();
+    if (result == DIR_NONE) {
+        // do nothing
+    } else if (result == DIR_CW) {
+        Serial.println("ClockWise");
+        ++encoder_position;
+    } else if (result == DIR_CCW) {
+        Serial.println("CounterClockWise");
+        --encoder_position;
+    }
+}
+
 bool bmp_ok = false;
 
 void setup() {
@@ -592,8 +644,8 @@ void setup() {
     // let the power settle
     delay(1000); // 1s
 #endif
-#if 0
-    Serial.begin(115200);
+#if 1
+    Serial.begin(9600);
     Serial.println("boot");
 #endif
 
@@ -602,7 +654,16 @@ void setup() {
     pinMode(MODE_SWITCH, INPUT);
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
 
+    // Set up the roatary encoder using Pin Change Interrupts
+    pinMode(ROTARY_CLK, INPUT_PULLUP);
+    pinMode(ROTARY_DAT, INPUT_PULLUP);
+
+    attachPCINT(digitalPinToPCINT(ROTARY_CLK), rotary_encoder_event, CHANGE);
+    attachPCINT(digitalPinToPCINT(ROTARY_DAT), rotary_encoder_event, CHANGE);
+
+#if 0
     rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
+#endif
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
@@ -615,21 +676,31 @@ void setup() {
     int sda = TWI_SDA;
     int scl = TWI_SCL;
     Wire.begin(sda, scl);
+    Serial.printf("Wire status: %d\n", Wire.status());
 #endif
-#if 0
-    int status = Wire.status();
-    Serial.printf("Wire status: %d\n", status);
-#endif
+
     // Let the twi settle before starting the BMP or RTC
     delay(1000);
 
     int bmp_tries = 0;
     while (bmp_tries < 10 && !(bmp_ok = bmp.begin())) {
+        Serial.print("bmp init trial: ");
+        Serial.println(bmp_tries);
         delay(100);
         bmp_tries++;
     }
+    Serial.print("bmp init trial: ");
+    Serial.println(bmp_tries);
+
+    Serial.print("bmp temp: ");
+    Serial.println(get_temp());
+    Serial.print("bmp SLP: ");
+    Serial.println(get_sea_level_pressure());
 
     RTC.begin(); // always returns true
+    DateTime boot_time(RTC.now());
+    Serial.print("RTC boot: ");
+    Serial.println(boot_time.unixtime());
 
 #if ADJUST_TIME
     // Run this here, before serial configuration to shorten the delay
@@ -683,7 +754,6 @@ void setup() {
     // values by default.
 #if RESET_PARAMS
     EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-    EEPROM.commit();
 #else
     EEPROM.get(SAVED_STATE_ADDRESS, saved_state);
 #endif
@@ -700,6 +770,8 @@ void setup() {
     zero_dots();
 
     display(true);
+
+    control_mode = info;
 }
 
 unsigned long temperature_update_time = 0;
@@ -763,8 +835,11 @@ void loop() {
     // Get the current time
     DateTime now(RTC.now());
 
-    // Test the rotary encoder
+// Test the rotary encoder
+#if 0
     long newPos = rotary_encoder_poll();
+#endif
+    long newPos = old_encoder_position;
 
     // Based on the control mode, look at the encoder position and
     // act accordingly. For the 'info' mode, display hour/min, min/sec,
@@ -773,13 +848,13 @@ void loop() {
     // is needed.
     switch (control_mode) {
     case info: {
-        if (newPos != encoder_position) {
-            if (newPos > encoder_position)
+        if (encoder_position != old_encoder_position) {
+            if (encoder_position > old_encoder_position)
                 display_mode_forward();
-            else if (newPos < encoder_position)
+            else if (encoder_position < old_encoder_position)
                 display_mode_backward();
 
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
 
             switch (display_mode) {
             case hours_mins:
@@ -823,8 +898,8 @@ void loop() {
     }
 
     case display_intensity: {
-        if (newPos != encoder_position) {
-            saved_state.brightness += 5 * (newPos - encoder_position);
+        if (encoder_position != old_encoder_position) {
+            saved_state.brightness += 5 * (encoder_position - old_encoder_position);
             if (saved_state.brightness > 127)
                 saved_state.brightness = 127;
             else if (saved_state.brightness < 0)
@@ -832,24 +907,24 @@ void loop() {
 
             display(false);
 
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
         }
         break;
     }
 
     case color: {
-        if (newPos != encoder_position) {
-            change_color((newPos - encoder_position) * 10);
+        if (encoder_position != old_encoder_position) {
+            change_color((encoder_position - old_encoder_position) * 10);
             show_color();
 
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
         }
         break;
     }
 
     case led_intensity: {
-        if (newPos != encoder_position) {
-            saved_state.led_brightness += 5 * (newPos - encoder_position);
+        if (encoder_position != old_encoder_position) {
+            saved_state.led_brightness += 5 * (encoder_position - old_encoder_position);
             if (saved_state.led_brightness > 127)
                 saved_state.led_brightness = 127;
             else if (saved_state.led_brightness < 0)
@@ -857,15 +932,14 @@ void loop() {
 
             show_color();
 
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
         }
         break;
     }
 
-    // TODO add this
     case set_hours:
-        if (newPos != encoder_position) {
-            long offset = newPos - encoder_position;
+        if (encoder_position != old_encoder_position) {
+            long offset = encoder_position - old_encoder_position;
 
             // set the clock.
             TimeSpan ts(0, offset, 0, 0); // Get a time span for offset hours
@@ -876,13 +950,13 @@ void loop() {
             set_values(now.hour(), now.minute());
             display(true);
             save_values();
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
         }
         break;
 
     case set_minutes:
-        if (newPos != encoder_position) {
-            long offset = newPos - encoder_position;
+        if (encoder_position != old_encoder_position) {
+            long offset = encoder_position - old_encoder_position;
 
             // set the clock.
             TimeSpan ts(0, 0, offset, 0); // Get a time span for offset minutes
@@ -895,7 +969,7 @@ void loop() {
             set_values(now.hour(), now.minute());
             display(true);
             save_values();
-            encoder_position = newPos;
+            old_encoder_position = encoder_position;
         }
         break;
 
