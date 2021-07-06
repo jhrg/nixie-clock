@@ -14,9 +14,7 @@
 
 #include <Arduino.h>
 
-//#if BUILD_ESP8266_NODEMCU
 #include <EEPROM.h>
-//#endif
 
 #include <Adafruit_BMP085.h>
 #include <PinChangeInterrupt.h>
@@ -26,26 +24,7 @@
 
 #include "exixe.h"
 
-#if 0
-#include "rotary_encoder.h"
-#endif
-
 // Define GPIO pins
-
-#if BUILD_ESP8266_NODEMCU
-#define TWI_SDA 4
-#define TWI_SCL 5
-
-#define MODE_SWITCH D8
-#define ROTARY_CLK D3 // CLOCK
-#define ROTARY_DAT D4 // DATA
-
-#define digit_1_cs 1  // MSD hours
-#define digit_2_cs 3  // hours
-#define digit_3_cs 10 // MSD minutes
-#define digit_4_cs 16 // minutes
-
-#elif BUILD_PRO_MINI
 
 #define TWI_SDA A5
 #define TWI_SCL A4
@@ -60,11 +39,6 @@
 #define digit_4_cs 10 // minutes
 
 // SPI bus is 10 SS, 11 MOSI, 12 MISO, 13 CLK
-#else
-
-#error "Must define platform"
-
-#endif
 
 #define BAUD_RATE 9600 // not used
 
@@ -112,21 +86,15 @@ struct SavedState {
 // Real time clock
 RTC_DS3231 RTC; // we are using the DS3231 RTC
 
+/**
+ * @brief State of teh display
+ */
 enum DisplayMode {
     hours_mins = 0,
     mins_secs = 1,
     temperature = 2,
     pressure = 3,
     set_time = 4
-};
-
-enum ControlMode {
-    info = 0,
-    display_intensity = 1,
-    color = 2,
-    led_intensity = 3,
-    set_hours = 4,
-    set_minutes = 5
 };
 
 volatile DisplayMode display_mode = hours_mins;
@@ -136,10 +104,22 @@ Adafruit_BMP085 bmp;
 // Current encoder position
 volatile long encoder_position = 0;
 // Last encoder position the code used. This is updated once any
-// change in the encoder is processes]d.
+// change in the encoder is processes]d. Not modified by an ISR.
 long old_encoder_position = 0;
 
 Rotary rotary_encoder = Rotary(ROTARY_CLK, ROTARY_DAT);
+
+/** 
+ * @brief State of the push button control
+ */
+enum ControlMode {
+    info = 0,
+    display_intensity = 1,
+    color = 2,
+    led_intensity = 3,
+    set_hours = 4,
+    set_minutes = 5
+};
 
 // volatile bool control_mode_change = false;
 volatile unsigned long control_mode_switch_time = 0;
@@ -152,109 +132,6 @@ volatile ControlMode prev_control_mode = info;
 // Is the timed_mode_switch ISR triggered on the rising or falling
 // edge of the interrupt?
 volatile int control_mode_switch_duration = 0;
-
-#if BUILD_ESP8266_NODEMCU
-// Forward declaration
-ICACHE_RAM_ATTR void timed_mode_switch_release();
-
-/**
- * The ISR for the mode switch. Triggerred when the switch is pressed.
- * The mode switch GPIO is held LOW normally and a button press causes
- * the input to go high. The ISR is triggerred on the rising edge of
- * the interrupt. Capture the time and set the duration to zero. Then
- * register a second ISR for the button release, which will be triggerred
- * when the GPIO pin state drops back to the LOW level.
- * 
- * @note Interrupts are disabled in ISR functions and millis() does
- * not advance.
- */
-ICACHE_RAM_ATTR void timed_mode_switch_push() {
-    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
-        // Triggered on th rising edge is the button press; start the timer
-        control_mode_switch_time = millis();
-        control_mode_switch_duration = 0;
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_release, FALLING);
-    }
-}
-
-/**
- * When the mode switch is released, this ISR is run.
- */
-ICACHE_RAM_ATTR void timed_mode_switch_release() {
-    if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
-        attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
-        control_mode_switch_duration = millis() - control_mode_switch_time;
-        control_mode_switch_time = millis();
-        prev_control_mode = control_mode; // Used to update the 'mode display'
-
-        if (control_mode_switch_duration > LONG_MODE_SWITCH_PRESS) {
-            switch (control_mode) {
-            case info:
-            case display_intensity:
-            case color:
-            case led_intensity:
-                control_mode = set_hours;
-                break;
-
-            case set_hours:
-                control_mode = info;
-                break;
-
-            case set_minutes:
-                control_mode = info;
-                break;
-            }
-        } else {
-            switch (control_mode) {
-            case info:
-                control_mode = display_intensity;
-                break;
-            case display_intensity:
-                control_mode = color;
-                break;
-            case color:
-                control_mode = led_intensity;
-                break;
-            case led_intensity:
-                // led_intensity is the end of the cycle of the four main modes
-                control_mode = info;
-                break;
-
-            // If in set-time mode, a short press goes from hours to minutes
-            case set_hours:
-                control_mode = set_minutes;
-                break;
-
-            case set_minutes:
-                control_mode = info;
-                break;
-
-            default:
-                break;
-            }
-        }
-    }
-}
-#elif BUILD_PRO_MINI
-// Implement the rotary encoder ISR
-#if 0
-// NOT USED
-/** @brief ISR for the A0-A5 pins; triggered on any change
- */
-ISR(PCINT1_vect) {
-}
-
-/**
- * @brief Configure the PCI (pin change interrupt) for a pin
- * This is called by setup() to configure the interrupts that 
- * trigger the above ISR code.
- */
-void pci_setup(int pin) {
-    *digitalPinToPCMSK(pin) |= bit(digitalPinToPCMSKbit(pin)); // enable interrupt for pin
-    PCIFR |= bit(digitalPinToPCICRbit(pin));                   // clear any outstanding interrupt
-    PCICR |= bit(digitalPinToPCICRbit(pin));                   // enable interrupt for the group
-}
-#endif
 
 // The next two functions are ISRs that implement the mode-switch.
 // Forward declaration
@@ -272,6 +149,7 @@ void timed_mode_switch_release();
  * not advance.
  */
 void timed_mode_switch_push() {
+    cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         Serial.println("timed_mode_switch_push");
         // Triggered on th rising edge is the button press; start the timer
@@ -279,12 +157,14 @@ void timed_mode_switch_push() {
         control_mode_switch_duration = 0;
         attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_release, FALLING);
     }
+    sei();
 }
 
 /**
  * When the mode switch is released, this ISR is run.
  */
 void timed_mode_switch_release() {
+    cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         Serial.println("timed_mode_switch_release");
         attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
@@ -344,8 +224,8 @@ void timed_mode_switch_release() {
         Serial.print("control_mode: ");
         Serial.println(control_mode);
     }
+    sei();
 }
-#endif
 
 /**
  * Copy the values[] array to the old_values[] array. Comparing a new time
@@ -370,7 +250,8 @@ void set_values(unsigned int left_pair, unsigned int right_pair) {
 
 /**
  * If old_values[] is not equal to values[], return the index of the leftmost
- * digit that differs (1, 2, 3, 4). If old_values[] == values[], return 0;
+ * most significant) digit that differs (1, 2, 3, 4). If old_values[] == values[], 
+ * return 0
  */
 unsigned int values_changed() {
     for (int i = 0; i < NUM_TUBES; ++i) {
@@ -387,10 +268,8 @@ unsigned int values_changed() {
  * 
  * Only call this function if at least one tube's value should change.
  * 
- * In the loop that actually does the fade, poll the rotary encoder.
- * 
  * @param count the number of tubes/digits to change (1-4), starting
- * with the fourth tube and working backward.
+ * with the fourth tube (least significant) and working backward.
  */
 void digit_crossfade(unsigned int count) {
     int fade = fade_time * count;
@@ -412,9 +291,6 @@ void digit_crossfade(unsigned int count) {
 
     bool done;
     do {
-#if 0
-        rotary_encoder_poll();
-#endif
         done = true;
         switch (count) {
         case 4:
@@ -584,6 +460,7 @@ float get_temp() {
     return bmp.readTemperature() * (9.0 / 5.0) + 32.0; // C --> F
 }
 
+#define hPa_per_inch_Hg 0.0002953
 /**
  * Butte is 1,682 m (5,518 ft)
  * One hPa is 0.0002953 inch Hg
@@ -591,14 +468,14 @@ float get_temp() {
  * @return sea level pressure in inches of Hg
  */
 float get_sea_level_pressure(float alt = 1682) {
-    return bmp.readSealevelPressure(alt) * 0.0002953;
+    return bmp.readSealevelPressure(alt) * hPa_per_inch_Hg;
 }
 
 /**
  * @return sea level pressure in inches of Hg
  */
 float get_pressure() {
-    return bmp.readPressure() * 0.0002953;
+    return bmp.readPressure() * hPa_per_inch_Hg;
 }
 
 void zero_dots() {
@@ -624,6 +501,9 @@ void display_dots() {
     }
 }
 
+/**
+ * @brief ISR for the rotary encoder. 
+ */
 void rotary_encoder_event() {
     unsigned char result = rotary_encoder.process();
     if (result == DIR_NONE) {
@@ -640,10 +520,6 @@ void rotary_encoder_event() {
 bool bmp_ok = false;
 
 void setup() {
-#if 0
-    // let the power settle
-    delay(1000); // 1s
-#endif
 #if 1
     Serial.begin(9600);
     Serial.println("boot");
@@ -661,26 +537,10 @@ void setup() {
     attachPCINT(digitalPinToPCINT(ROTARY_CLK), rotary_encoder_event, CHANGE);
     attachPCINT(digitalPinToPCINT(ROTARY_DAT), rotary_encoder_event, CHANGE);
 
-#if 0
-    rotary_encoder_setup(ROTARY_CLK, ROTARY_DAT);
-#endif
-
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
     pinMode(digit_3_cs, OUTPUT);
     pinMode(digit_4_cs, OUTPUT);
-
-#if BUILD_ESP8266_NODEMCU
-    // Setup the I2C bus for the DS3231 clock
-    // On the NodeMCU, GPIOR04 is D2, GPIOR05 is D1
-    int sda = TWI_SDA;
-    int scl = TWI_SCL;
-    Wire.begin(sda, scl);
-    Serial.printf("Wire status: %d\n", Wire.status());
-#endif
-
-    // Let the twi settle before starting the BMP or RTC
-    delay(1000);
 
     int bmp_tries = 0;
     while (bmp_tries < 10 && !(bmp_ok = bmp.begin())) {
@@ -724,40 +584,14 @@ void setup() {
     tubes[DIGIT_3] = &digit_3;
     tubes[DIGIT_4] = &digit_4;
 
-#if BUILD_ESP8266_NODEMCU
-    // Get the state vector from the EEPROM and use it.
-    // If the brightness and led_brightness are zero, use the
-    // default values.
-    EEPROM.begin(sizeof(SavedState));
-
-    // Set or clear this in the platformio.ini file. This ensures
-    // that the EEPROM (flash for the ESP8266) has values that don't
-    // freak out the MCU on boot because the memory has random
-    // values by default.
-#if RESET_PARAMS
-    EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-    EEPROM.commit();
-#else
-    EEPROM.get(SAVED_STATE_ADDRESS, saved_state);
-#endif
-
-#elif BUILD_PRO_MINI
-
-    // Get the state vector from the EEPROM and use it.
-    // If the brightness and led_brightness are zero, use the
-    // default values.
-    //EEPROM.begin(sizeof(SavedState));
-
-    // Set or clear this in the platformio.ini file. This ensures
-    // that the EEPROM (flash for the ESP8266) has values that don't
-    // freak out the MCU on boot because the memory has random
-    // values by default.
+    // Set or clear RESET_PARAMS in the platformio.ini file. This ensures
+    // that the EEPROM (flash for the ESP8266) has values that won't
+    // freak out the MCU on boot because the memory has random values by 
+    // default.
 #if RESET_PARAMS
     EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
 #else
     EEPROM.get(SAVED_STATE_ADDRESS, saved_state);
-#endif
-
 #endif
 
     show_color();
@@ -781,20 +615,17 @@ void loop() {
 
     // If the control/configuration mode has changed, update the display.
     if (prev_control_mode != control_mode) {
-        // When we're here changing modes, save the state. Only copies
-        // to EEPROM when commit is called when we transition to the info
-        // state. Only for the nodeMCU, not true for the Pro-mini.
-        EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-
+ 
         prev_control_mode = control_mode;
 
         switch (control_mode) {
         case info:
+            // When we're here changing modes, save the state. Only copies
+            // to EEPROM when commit is called when we transition to the info
+            // state. 
+            EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
+
             zero_dots();
-#if BUILD_ESP8266_NODEMCU
-            // TODO Check if there's really a difference to save.
-            EEPROM.commit(); // This actually saves the data.
-#endif
             break;
 
         case display_intensity:
@@ -834,12 +665,6 @@ void loop() {
 
     // Get the current time
     DateTime now(RTC.now());
-
-// Test the rotary encoder
-#if 0
-    long newPos = rotary_encoder_poll();
-#endif
-    long newPos = old_encoder_position;
 
     // Based on the control mode, look at the encoder position and
     // act accordingly. For the 'info' mode, display hour/min, min/sec,
