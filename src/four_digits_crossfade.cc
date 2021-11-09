@@ -87,7 +87,7 @@ struct SavedState {
 RTC_DS3231 RTC; // we are using the DS3231 RTC
 
 /**
- * @brief State of teh display
+ * @brief State of the display
  */
 enum DisplayMode {
     hours_mins = 0,
@@ -104,7 +104,7 @@ Adafruit_BMP085 bmp;
 // Current encoder position
 volatile long encoder_position = 0;
 // Last encoder position the code used. This is updated once any
-// change in the encoder is processes]d. Not modified by an ISR.
+// change in the encoder is processesed. Not modified by an ISR.
 long old_encoder_position = 0;
 
 Rotary rotary_encoder = Rotary(ROTARY_CLK, ROTARY_DAT);
