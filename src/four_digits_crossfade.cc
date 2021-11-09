@@ -16,12 +16,12 @@
 
 #include <EEPROM.h>
 
-#include <Adafruit_BMP085.h>
 #include <PinChangeInterrupt.h>
 #include <RTClibExtended.h>
 #include <Rotary.h>
 #include <Wire.h>
 
+#include "Adafruit_BMP085.h"
 #include "exixe.h"
 
 // Define GPIO pins
@@ -32,6 +32,10 @@
 #define MODE_SWITCH 2 // Promini INT0
 #define ROTARY_CLK 5  // CLOCK
 #define ROTARY_DAT 6  // DATA
+
+// At some point, this could be made smart, but for now
+// it is set low (enabled) at startup. 
+#define HV_PS_ENABLE 4 // Turn on the HV (180V) power supply
 
 #define digit_1_cs 7  // MSD hours
 #define digit_2_cs 8  // hours
@@ -536,6 +540,11 @@ void setup() {
 
     attachPCINT(digitalPinToPCINT(ROTARY_CLK), rotary_encoder_event, CHANGE);
     attachPCINT(digitalPinToPCINT(ROTARY_DAT), rotary_encoder_event, CHANGE);
+
+    // TODO Modify this so that the power to the digits can be cut to extend tube
+    // life, etc. For now, the tubes are always on. jhrg 11/8/21
+    pinMode(HV_PS_ENABLE, OUTPUT);
+    digitalWrite(HV_PS_ENABLE, LOW);
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
