@@ -94,11 +94,12 @@ RTC_DS3231 RTC; // we are using the DS3231 RTC
  * @brief State of the display
  */
 enum DisplayMode {
-    hours_mins = 0,
-    mins_secs = 1,
-    temperature = 2,
-    pressure = 3,
-    set_time = 4
+    off = 0,
+    hours_mins = 1,
+    mins_secs = 2,
+    temperature = 3,
+    pressure = 4,
+    set_time = 5
 };
 
 volatile DisplayMode display_mode = hours_mins;
@@ -311,7 +312,8 @@ void digit_crossfade(unsigned int count) {
 
 void set_digit(int count, exixe *tube, bool fade) {
     if (fade) {
-        unsigned int delta = ceil(INITIAL_FADE_TIME / saved_state.brightness);
+        // max() keeps brightness from being == 0 
+        unsigned int delta = ceil(INITIAL_FADE_TIME / max(saved_state.brightness, 1));
         for (int b = 0; b < saved_state.brightness + 1; b++) {
             tube->show_digit(count, b, 0);
             delay(delta);
@@ -330,6 +332,9 @@ void display(bool fade = false) {
 
 void display_mode_forward() {
     switch (display_mode) {
+    case off:
+        display_mode = hours_mins;
+        break;
     case hours_mins:
         display_mode = mins_secs;
         break;
@@ -340,17 +345,22 @@ void display_mode_forward() {
         display_mode = pressure;
         break;
     case pressure:
-        display_mode = hours_mins;
+        display_mode = off;
         break;
     default:
         break;
     }
+
+    Serial.print("Display moed: "); Serial.println(display_mode);
 }
 
 void display_mode_backward() {
     switch (display_mode) {
-    case hours_mins:
+    case off:
         display_mode = pressure;
+        break;
+    case hours_mins:
+        display_mode = off;
         break;
     case mins_secs:
         display_mode = hours_mins;
@@ -364,6 +374,8 @@ void display_mode_backward() {
     default:
         break;
     }
+
+    Serial.print("Display mode: "); Serial.println(display_mode);
 }
 
 /**
@@ -544,7 +556,7 @@ void setup() {
     // TODO Modify this so that the power to the digits can be cut to extend tube
     // life, etc. For now, the tubes are always on. jhrg 11/8/21
     pinMode(HV_PS_ENABLE, OUTPUT);
-    digitalWrite(HV_PS_ENABLE, LOW);
+    digitalWrite(HV_PS_ENABLE, HIGH);
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
@@ -614,6 +626,10 @@ void setup() {
 
     display(true);
 
+#if 0
+    Serial.println("After display(true) call");
+#endif
+
     control_mode = info;
 }
 
@@ -633,7 +649,6 @@ void loop() {
             // to EEPROM when commit is called when we transition to the info
             // state. 
             EEPROM.put(SAVED_STATE_ADDRESS, saved_state);
-
             zero_dots();
             break;
 
@@ -691,6 +706,12 @@ void loop() {
             old_encoder_position = encoder_position;
 
             switch (display_mode) {
+            case off:
+                set_values(now.hour(), now.minute());
+                zero_dots();
+                digitalWrite(HV_PS_ENABLE, HIGH);   // active low
+                break;
+
             case hours_mins:
                 set_values(now.hour(), now.minute());
                 decimal_point(false);
@@ -724,6 +745,10 @@ void loop() {
                 zero_dots();
                 break;
             }
+
+            // If the display mode is not 'off', enable the HV for the tubes
+            if (display_mode != off)
+                digitalWrite(HV_PS_ENABLE, LOW);   // active low
 
             display(true);
             save_values();
@@ -818,6 +843,7 @@ void loop() {
         set_values(now.hour(), now.minute());
 
         if ((digit = values_changed())) {
+            Serial.print("Time: "); Serial.print(now.hour());Serial.print(":"); Serial.println(now.minute());
             digit_crossfade(digit);
             save_values();
         }
@@ -826,6 +852,7 @@ void loop() {
     case mins_secs:
         set_values(now.minute(), now.second());
         if ((digit = values_changed())) {
+            Serial.print("Time: "); Serial.print(now.minute());Serial.print(":"); Serial.println(now.second());
             digit_crossfade(digit);
             save_values();
         }
@@ -859,6 +886,7 @@ void loop() {
         }
         break;
     }
+
     default:
         break;
     }
