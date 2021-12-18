@@ -44,7 +44,7 @@
 
 // SPI bus is 10 SS, 11 MOSI, 12 MISO, 13 CLK
 
-#define BAUD_RATE 9600 // not used
+#define BAUD_RATE 9600
 
 #define INITIAL_FADE_TIME 250             // ms, time to fade in a digit when modes change
 #define MEASUREMENT_UPDATE_INTERVAL 10000 // 10s
@@ -154,6 +154,10 @@ void timed_mode_switch_release();
  * not advance.
  */
 void timed_mode_switch_push() {
+    // Do not allow control mode switches when the display is off
+    if (display_mode == off)
+        return;
+
     cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         Serial.println("timed_mode_switch_push");
@@ -169,6 +173,10 @@ void timed_mode_switch_push() {
  * When the mode switch is released, this ISR is run.
  */
 void timed_mode_switch_release() {
+    // Do not allow control mode switches when the display is off
+    if (display_mode == off)
+        return;
+
     cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         Serial.println("timed_mode_switch_release");
@@ -536,10 +544,9 @@ void rotary_encoder_event() {
 bool bmp_ok = false;
 
 void setup() {
-#if 1
-    Serial.begin(9600);
+    // Enable some minor, chatty, messages on the serial line.
+    Serial.begin(BAUD_RATE);
     Serial.println("boot");
-#endif
 
     // MODE_SWITCH is D8 which must be low during boot and is pulled by the switch
     // But using FALLING seems more reliable
@@ -553,10 +560,8 @@ void setup() {
     attachPCINT(digitalPinToPCINT(ROTARY_CLK), rotary_encoder_event, CHANGE);
     attachPCINT(digitalPinToPCINT(ROTARY_DAT), rotary_encoder_event, CHANGE);
 
-    // TODO Modify this so that the power to the digits can be cut to extend tube
-    // life, etc. For now, the tubes are always on. jhrg 11/8/21
     pinMode(HV_PS_ENABLE, OUTPUT);
-    digitalWrite(HV_PS_ENABLE, HIGH);
+    digitalWrite(HV_PS_ENABLE, LOW);
 
     pinMode(digit_1_cs, OUTPUT);
     pinMode(digit_2_cs, OUTPUT);
