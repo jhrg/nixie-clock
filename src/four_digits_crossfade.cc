@@ -89,7 +89,7 @@ unsigned int fade_time = 7; // 30 frames = 1 second
 
 // brightness, led_brightness and color_values are adjusted by the
 // rotary encoder and can be negative. These values are saved in
-// EEPROM so they carry over even when the clock is off.
+// EEPROM so they carry over even when the clock is off. 
 
 #define SAVED_STATE_ADDRESS 0
 #define MAX_COLOR_VALUE 127
@@ -126,7 +126,7 @@ Adafruit_BMP085 bmp;
 // Current encoder position
 volatile long encoder_position = 0;
 // Last encoder position the code used. This is updated once any
-// change in the encoder is processesed. Not modified by an ISR.
+// change in the encoder is processed. Not modified by an ISR.
 long old_encoder_position = 0;
 
 Rotary rotary_encoder = Rotary(ROTARY_CLK, ROTARY_DAT);
@@ -376,7 +376,7 @@ void display_mode_forward() {
         break;
     }
 
-    Serial.print("Display moed: "); Serial.println(display_mode);
+    Serial.print("Display mode: "); Serial.println(display_mode);
 }
 
 void display_mode_backward() {
@@ -583,7 +583,7 @@ void setup() {
     pinMode(MODE_SWITCH, INPUT);
     attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_push, RISING);
 
-    // Set up the roatary encoder using Pin Change Interrupts
+    // Set up the rotary encoder using Pin Change Interrupts
     pinMode(ROTARY_CLK, INPUT_PULLUP);
     pinMode(ROTARY_DAT, INPUT_PULLUP);
 
