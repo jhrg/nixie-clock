@@ -24,6 +24,23 @@
 #include "Adafruit_BMP085.h"
 #include "exixe.h"
 
+// Override these in platformio.ini
+#ifndef ROTARY_SWITCH_REVERSED
+#define ROTARY_SWITCH_REVERSED 0
+#endif
+
+#ifndef ADJUST_TIME
+#define ADJUST_TIME 0
+#endif
+
+#ifndef TIME_OFFSET
+#define TIME_OFFSET 47
+#endif
+
+#ifndef RESET_PARAMS
+#define RESET_PARAMS 0
+#endif
+
 // Define GPIO pins
 
 #define TWI_SDA A5
@@ -532,13 +549,26 @@ void rotary_encoder_event() {
     unsigned char result = rotary_encoder.process();
     if (result == DIR_NONE) {
         // do nothing
-    } else if (result == DIR_CW) {
+    } 
+#if ROTARY_SWITCH_REVERSED
+    else if (result == DIR_CCW) {
         Serial.println("ClockWise");
         ++encoder_position;
-    } else if (result == DIR_CCW) {
+    } 
+    else if (result == DIR_CW) {
+        Serial.println("CounterClockWise");
+        --encoder_position;
+    }   
+#else
+    else if (result == DIR_CW) {
+        Serial.println("ClockWise");
+        ++encoder_position;
+    } 
+    else if (result == DIR_CCW) {
         Serial.println("CounterClockWise");
         --encoder_position;
     }
+#endif
 }
 
 bool bmp_ok = false;
