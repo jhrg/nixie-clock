@@ -178,7 +178,7 @@ void timed_mode_switch_push() {
     cli();
     if (millis() > control_mode_switch_time + MODE_SWITCH_INTERVAL) {
         Serial.println("timed_mode_switch_push");
-        // Triggered on th rising edge is the button press; start the timer
+        // Triggered on the rising edge is the button press; start the timer
         control_mode_switch_time = millis();
         control_mode_switch_duration = 0;
         attachInterrupt(digitalPinToInterrupt(MODE_SWITCH), timed_mode_switch_release, FALLING);
