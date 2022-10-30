@@ -160,13 +160,13 @@ volatile int control_mode_switch_duration = 0;
 void timed_mode_switch_release();
 
 /**
- * The ISR for the mode switch. Triggerred when the switch is pressed.
+ * The ISR for the mode switch. Triggered when the switch is pressed.
  * The mode switch GPIO is held LOW normally and a button press causes
- * the input to go high. The ISR is triggerred on the rising edge of
+ * the input to go high. The ISR is triggered on the rising edge of
  * the interrupt. Capture the time and set the duration to zero. Then
- * register a second ISR for the button release, which will be triggerred
+ * register a second ISR for the button release, which will be triggered
  * when the GPIO pin state drops back to the LOW level.
- * 
+ *
  * @note Interrupts are disabled in ISR functions and millis() does
  * not advance.
  */
