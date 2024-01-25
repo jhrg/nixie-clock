@@ -3,7 +3,7 @@ Nixie clock code
 
 1/28/21
 
-The current version of this clock software is 0.9.5
+The current version of this clock software is 0.9.6
 
 The clock can display hour and minutes, minutes and seconds, temperature,
 and barometric pressure corrected for altitude. The digits can also be 
@@ -27,5 +27,10 @@ bus).
 
 The clock uses the Arduino EEPROM to store values for the intensity and
 color values so they will be saved even if power is removed.
+
+Version 0.9.6: Fixed the time set modes so that they don't use the digit fades.
+That was making the display tediously slow while trying to set the time. Also 
+removed the compiled in time of 1638; now used the time of the clock which can
+be maintained by the battery.
 
 12/18/21

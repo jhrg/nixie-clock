@@ -46,7 +46,7 @@
 #define TWI_SDA A5
 #define TWI_SCL A4
 
-#define MODE_SWITCH 2 // Promini INT0
+#define MODE_SWITCH 2  // Pro-mini INT0
 #define ROTARY_CLK 5  // CLOCK
 #define ROTARY_DAT 6  // DATA
 
@@ -842,7 +842,8 @@ void loop() {
 
             // Update the display
             set_values(now.hour(), now.minute());
-            display(true);
+            // Don't use the crossfade when setting time (use default 'false'). jhrg 1/24/24
+            display();
             save_values();
             old_encoder_position = encoder_position;
         }
@@ -861,7 +862,8 @@ void loop() {
 
             // Update the display
             set_values(now.hour(), now.minute());
-            display(true);
+            // Don't use the crossfade when setting time. jhrg 1/24/24
+            display();
             save_values();
             old_encoder_position = encoder_position;
         }
